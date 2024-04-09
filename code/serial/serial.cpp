@@ -3,6 +3,7 @@
 #include "papi.h"
 #include <numeric>
 #include <filesystem>
+#include <regex>
 
 //Just a wrapper to index 2D image stored as flat array
 class Image
@@ -88,15 +89,27 @@ int main(int argc, char **argv)
     //profile reading the files
     PAPI_start(event_set[0]);
     t0 = PAPI_get_real_nsec();
+    map<string, float> monthly_ndvis;
     for(const auto& pszFname : filesystem::recursive_directory_iterator(pszDir))
     {
         std::cout<<pszFname<<std::endl;
         string tmp = pszFname.path().string();
         pszFilename = tmp.c_str();
     
-        //get a sense of what time this is
+        //get a sense of what date this is from the file name
+        regex pattern("2024\\d{4}_");
+        auto wbegin = sregex_iterator(tmp.begin(), tmp.end(), pattern);           
+        auto wend = sregex_iterator();
+        string month;
+        for(sregex_iterator i=wbegin; i!=wend; ++i)
+        {
+            smatch match = *i;
+            string match_str = match.str();
+            month = match_str.substr(4,2);
+            string day = match_str.substr(6,2);
+            cout<<"month: "<<month<<", day:"<<day<<endl;
+        }
         
-
         //Create object
         PAPI_start(event_set[0]);
         t0 = PAPI_get_real_nsec();
@@ -113,12 +126,17 @@ int main(int argc, char **argv)
         t0 = PAPI_get_real_nsec();
         for(size_t i=0;i<img.vec.size();i++)
             max_ndvi = img.vec[i]>max_ndvi ? img.vec[i] : max_ndvi;
+        monthly_ndvis[month]  = max_ndvi>monthly_ndvis[month] ? max_ndvi : monthly_ndvis[month];
         times[1] += PAPI_get_real_nsec() - t0;
         PAPI_stop(event_set[1], processing_counters);
 
-        std::cout<<"\n Max NDVI: "<<max_ndvi<<std::endl;
+        //std::cout<<"\n Max NDVI: "<<max_ndvi<<std::endl;
     }
     
+    cout<<"\nMonthly max ndvi's:"<<endl;
+    for(auto ndvi : monthly_ndvis)
+        cout<<"Month: "<<ndvi.first<<", max ndvi:"<<ndvi.second<<endl;
+
     std::cout<<"\nReading files time:"<<std::endl;
     output_profile(file_read_counters, times[0]);
     
