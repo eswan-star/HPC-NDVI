@@ -4,6 +4,7 @@
 #include <numeric>
 #include <filesystem>
 #include <regex>
+//#include <ofstream>
 
 //Just a wrapper to index 2D image stored as flat array
 class Image
@@ -29,8 +30,6 @@ class Image
         {
             return data[row*Ncol+col]; //row major order
         }
-
-
 };
 
 
@@ -60,6 +59,20 @@ void output_profile( long long int counters[4], long long int dt)
     return;
 }
 
+enum months{
+    Jan,
+    Feb,
+    Mar,
+    Apr,
+    May,
+    Jun,
+    Jul,
+    Aug,
+    Sep,
+    Oct,
+    Nov,
+    Dec
+};
 
 int main(int argc, char **argv)
 {   
@@ -89,27 +102,39 @@ int main(int argc, char **argv)
     //profile reading the files
     PAPI_start(event_set[0]);
     t0 = PAPI_get_real_nsec();
-    map<string, float> monthly_ndvis;
+    map<string, float[12]> maxes;
+    map<string, float[12]> mins;
+    map<string, float[12]> means;
+    map<string, float[12]> counts;
     for(const auto& pszFname : filesystem::recursive_directory_iterator(pszDir))
     {
-        std::cout<<pszFname<<std::endl;
+        //get the file name
         string tmp = pszFname.path().string();
         pszFilename = tmp.c_str();
     
         //get a sense of what date this is from the file name
-        regex pattern("2024\\d{4}_");
+        regex pattern("202\\d{5}_");
         auto wbegin = sregex_iterator(tmp.begin(), tmp.end(), pattern);           
         auto wend = sregex_iterator();
-        string month;
+        string year;
+        int month;
         for(sregex_iterator i=wbegin; i!=wend; ++i)
         {
             smatch match = *i;
             string match_str = match.str();
-            month = match_str.substr(4,2);
+            month = atoi(match_str.substr(4,2).c_str());
             string day = match_str.substr(6,2);
-            cout<<"month: "<<month<<", day:"<<day<<endl;
+            year = match_str.substr(0,4);
+            cout<<"month: "<<month<<", day:"<<day<<", year:"<<year<<endl;
+        } 
+        if(maxes.find(year)==maxes.end())
+        {
+            memset(maxes[year],0,12);// = {0,0,0,0,0,0,0,0,0,0,0,0};
+            memset(means[year],0,12);// = {0,0,0,0,0,0,0,0,0,0,0,0};
+            memset(counts[year],0,12);// = {0,0,0,0,0,0,0,0,0,0,0,0};
+            memset(mins[year],0,12);// = {0,0,0,0,0,0,0,0,0,0,0,0};
         }
-        
+       
         //Create object
         PAPI_start(event_set[0]);
         t0 = PAPI_get_real_nsec();
@@ -121,22 +146,35 @@ int main(int argc, char **argv)
         //do processing
         Image img(data, gtiff.GetDimensions());
         //iterate over the data doing processing
-        float max_ndvi = numeric_limits<float>::min();
+        float max_ndvi = -numeric_limits<float>::max();
+        float min_ndvi = numeric_limits<float>::max();
+        float mean = 0, count =0;
         PAPI_start(event_set[1]);
         t0 = PAPI_get_real_nsec();
-        for(size_t i=0;i<img.vec.size();i++)
-            max_ndvi = img.vec[i]>max_ndvi ? img.vec[i] : max_ndvi;
-        monthly_ndvis[month]  = max_ndvi>monthly_ndvis[month] ? max_ndvi : monthly_ndvis[month];
+        for(float ndvi : img.vec){
+            max_ndvi = ndvi>max_ndvi ? ndvi : max_ndvi;
+            min_ndvi = ndvi<min_ndvi ? ndvi : min_ndvi;
+            mean += ndvi;
+            count+=1;
+        }
         times[1] += PAPI_get_real_nsec() - t0;
         PAPI_stop(event_set[1], processing_counters);
-
+        maxes[year][month-1] = max_ndvi>maxes[year][month-1] ? max_ndvi : maxes[year][month-1];        
+        mins[year][month-1] = min_ndvi>mins[year][month-1] ? min_ndvi : mins[year][month-1];
+        means[year][month-1] += mean;
+        counts[year][month-1] += count;
         //std::cout<<"\n Max NDVI: "<<max_ndvi<<std::endl;
     }
     
-    cout<<"\nMonthly max ndvi's:"<<endl;
-    for(auto ndvi : monthly_ndvis)
-        cout<<"Month: "<<ndvi.first<<", max ndvi:"<<ndvi.second<<endl;
-
+    cout<<"\nNDVI trends:"<<endl;
+    for(auto N : maxes){
+        string year = N.first;
+        cout<<"Year:"<<year<<"\n";
+        for(int m=0;m<12;m++){
+            cout<<"Month:"<<m+1<<", max ndvi: "<<N.second[m]<<", mean:"<<means[year][m]/counts[year][m]<<", min:"<<mins[year][m]<<endl;    
+        }
+    }
+   
     std::cout<<"\nReading files time:"<<std::endl;
     output_profile(file_read_counters, times[0]);
     
@@ -148,5 +186,8 @@ int main(int argc, char **argv)
     //for(float m : maxes) std::cout<<m<<", ";
     //std::cout<<std::endl;
     
+    //Write out a text file which has timing data so python can use it
+     
+
     return 1;
 }
