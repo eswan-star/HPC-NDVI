@@ -23,7 +23,7 @@ class Geotiff {
     double geotransform[6];      // 6-element geotranform array.
     int dimensions[3];           // X,Y, and Z dimensions. 
     int NROWS,NCOLS,NLEVELS;     // dimensions of data in Geotiff. 
- 
+
   public: 
      
     // define constructor function to instantiate object
@@ -111,7 +111,7 @@ class Geotiff {
       return dimensions;  
     } 
  
-   float** GetRasterBand(int z) {
+   vector<float> GetRasterBand(int z) {
  
       /*
        * function float** GetRasterBand(int z): 
@@ -128,39 +128,39 @@ class Geotiff {
        * float** pointer. 
        */
  
-      float** bandLayer = new float*[NROWS];
+      //float** bandLayer = new float*[NROWS];
       switch( GDALGetRasterDataType(geotiffDataset->GetRasterBand(z)) ) {
         case 0:
-          return NULL; // GDT_Unknown, or unknown data type.
+          return vector<float>(); // GDT_Unknown, or unknown data type.
         case 1:
           // GDAL GDT_Byte (-128 to 127) - unsigned  char
-          return GetArray2D<unsigned char>(z,bandLayer); 
+          return GetArray2D<unsigned char>(z);//,bandLayer); 
         case 2:
           // GDAL GDT_UInt16 - short
-          return GetArray2D<unsigned short>(z,bandLayer);
+          return GetArray2D<unsigned short>(z);//,bandLayer);
         case 3:
           // GDT_Int16
-          return GetArray2D<short>(z,bandLayer);
+          return GetArray2D<short>(z);//,bandLayer);
         case 4:
           // GDT_UInt32
-          return GetArray2D<unsigned int>(z,bandLayer);
+          return GetArray2D<unsigned int>(z);//,bandLayer);
         case 5:
           // GDT_Int32
-          return GetArray2D<int>(z,bandLayer);
+          return GetArray2D<int>(z);//,bandLayer);
         case 6:
           // GDT_Float32
-          return GetArray2D<float>(z,bandLayer);
+          return GetArray2D<float>(z);//,bandLayer);
         case 7:
           // GDT_Float64
-          return GetArray2D<double>(z,bandLayer);
+          return GetArray2D<double>(z);//,bandLayer);
         default:     
           break;  
       }
-      return NULL;  
+      return vector<float>();  
     }
  
     template<typename T>
-    float** GetArray2D(int layerIndex, float* &bandLayer) {
+    vector<float> GetArray2D(int layerIndex) {
  
        /*
         * function float** GetArray2D(int layerIndex): 
@@ -188,10 +188,10 @@ class Geotiff {
  
        // allocate pointer to memory block for one row (scanline) 
        // in 2D Geotiff array.  
-       T *rowBuff = (T*) CPLMalloc(nbytes*NCOLS);
+       T *rowBuff = (T*) malloc(nbytes*NCOLS);
  
-        //allocate the total storage that will be needed to store image
-        bandLayer = (float*) CPLMalloc(sizeof(float)*NROWS*NCOLS); 
+       //allocate the total storage that will be needed to store image
+       vector<float> bandLayer(NROWS*NCOLS); 
 
        for(int row=0; row<NROWS; row++) {   // iterate through rows
  
@@ -204,12 +204,12 @@ class Geotiff {
          }
            
          //bandLayer[row] = new float[NCOLS];
-         float *bandLayerRow = &bandlayer[NCOLS*row];
+         float *bandLayerRow = &bandLayer[NCOLS*row];
          for( int col=0; col<NCOLS; col++ ) { // iterate through columns
            bandLayerRow[col] = (float)rowBuff[col]; //necessary to cast to float? 
          }
        }
-       CPLFree( rowBuff );
+       free( rowBuff );
        return bandLayer;
     }
  
