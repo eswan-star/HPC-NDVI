@@ -1,6 +1,8 @@
-
 #include "Geotiff.hpp"
 #include <algorithm>
+#include "papi.h"
+#include <numeric>
+#include <filesystem>
 
 //Just a wrapper to index 2D image stored as flat array
 class Image
@@ -31,9 +33,29 @@ class Image
 };
 
 
-void func()
+void output_profile( long long int counters[4], long long int dt)
 {
-    
+    long long total_cycles = counters[0];       // cpu cycles
+    const long long total_instructions = counters[1]; // any
+    const long long total_load_stores = counters[2];  // number of such instructions
+    const long long total_l1d_misses = counters[3];   // number of access request to cache linereturn 0;
+
+    const size_t flops = 1;
+    //const size_t mem_ops = 1;
+    double twall = static_cast<double>(dt) * 1.0e-9; // seconds
+    const double IPC = static_cast<double>(total_instructions) / total_cycles;
+    //const double OI =
+    //               static_cast<double>(flops) / (total_load_stores * sizeof(float));
+    //const double OI_theory =
+    //                    static_cast<double>(flops) / (mem_ops * sizeof(float));
+    const double float_perf = flops / twall * 1.0e-9; // Gflop/s
+
+    std::cout<< "twall:                         " << twall << '\n';
+    std::cout << "Total cycles:                 " << total_cycles << '\n';
+    std::cout << "Total instructions:           " << total_instructions << '\n';
+    std::cout << "Instructions per cycle (IPC): " << IPC << '\n';
+    std::cout << "Float performance:            " << float_perf <<'\n';
+   
     return;
 }
 
@@ -41,34 +63,72 @@ void func()
 int main(int argc, char **argv)
 {   
     //Get the filename "either a default or specified from command line"
-    const char*pszFilename;
+    const char* pszFilename;
+    const char* pszDir;
     if(argc==1)
         pszFilename = "NDVI_50_20231204_20231217_clip_20240407113518_2047798237.tif";
     else if(argc==2)
-        pszFilename = argv[1];
+        pszDir = argv[1];
     else
         return EINVAL;
 
-    //Create a Geotiff object from
-    Geotiff gtiff(pszFilename);
+    //profiling stuff
+    int event_set[2] = {PAPI_NULL, PAPI_NULL};
+    int events[4] = {PAPI_TOT_CYC, PAPI_TOT_INS, PAPI_LST_INS, PAPI_L1_DCM};
+    long long int file_read_counters[4];
+    long long int processing_counters[4];
+    PAPI_library_init(PAPI_VER_CURRENT);
+    PAPI_create_eventset(&event_set[0]);
+    PAPI_add_events(event_set[0], events,4);
+    PAPI_create_eventset(&event_set[1]);
+    PAPI_add_events(event_set[1], events, 4); 
+    long long int t0, t1;
+    long long int times[2] = {0,0};
 
-    //Print the desired metadata
-    int* dims = gtiff.GetDimensions();
-    for(int d=0;d<3;d++)
-        std::cout<<dims[d]<<", ";
-    std::cout<<std::endl;
-
-    //Get the desired data
-    int layerindex=0;
-    vector<float> data = gtiff.GetRasterBand(layerindex);
-    Image img(data, dims);
-
-    //iterate over the data doing processing
-    float max_ndvi = numeric_limits<float>::max();
-    for(size_t i=0;i<img.vec.size();i++)
-        max_ndvi = img.vec[i]>max_ndvi ? img.vec[i] : max_ndvi;
+    //profile reading the files
+    PAPI_start(event_set[0]);
+    t0 = PAPI_get_real_nsec();
+    for(const auto& pszFname : filesystem::recursive_directory_iterator(pszDir))
+    {
+        std::cout<<pszFname<<std::endl;
+        string tmp = pszFname.path().string();
+        pszFilename = tmp.c_str();
     
-    std::cout<<"Max NDVI: "<<max_ndvi<<std::endl;
+        //get a sense of what time this is
+        
+
+        //Create object
+        PAPI_start(event_set[0]);
+        t0 = PAPI_get_real_nsec();
+        Geotiff gtiff(pszFilename);
+        vector<float> data = gtiff.GetRasterBand(1);
+        times[0] += PAPI_get_real_nsec() - t0;
+        PAPI_stop(event_set[0], file_read_counters);
+        
+        //do processing
+        Image img(data, gtiff.GetDimensions());
+        //iterate over the data doing processing
+        float max_ndvi = numeric_limits<float>::min();
+        PAPI_start(event_set[1]);
+        t0 = PAPI_get_real_nsec();
+        for(size_t i=0;i<img.vec.size();i++)
+            max_ndvi = img.vec[i]>max_ndvi ? img.vec[i] : max_ndvi;
+        times[1] += PAPI_get_real_nsec() - t0;
+        PAPI_stop(event_set[1], processing_counters);
+
+        std::cout<<"\n Max NDVI: "<<max_ndvi<<std::endl;
+    }
     
-    return 0;
+    std::cout<<"\nReading files time:"<<std::endl;
+    output_profile(file_read_counters, times[0]);
+    
+    //profile processing the data
+    std::cout<<"\nData reduction time:"<<std::endl;
+    output_profile(processing_counters, times[1]);
+ 
+    //std::cout<<"\nMax NDVI: "<<std::endl; 
+    //for(float m : maxes) std::cout<<m<<", ";
+    //std::cout<<std::endl;
+    
+    return 1;
 }
