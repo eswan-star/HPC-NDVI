@@ -114,7 +114,7 @@ int main(int argc, char **argv)
     PAPI_create_eventset(&event_set[1]);
     PAPI_add_events(event_set[1], events, 4); 
     long long int t0, t1;
-    long long int times[2] = {0,0};
+    long long int times[4] = {0,0,0,0};
 
     //profile reading the files
     PAPI_start(event_set[0]);
@@ -123,6 +123,10 @@ int main(int argc, char **argv)
     map<string, float[12]> mins;
     map<string, float[12]> means;
     map<string, float[12]> counts;
+
+    //vector of vectors to store file data (not contiguous but avoids copy)
+    vector<vector<float>> data;
+    t0 = PAPI_get_real_nsec();
     for(const auto& pszFname : filesystem::recursive_directory_iterator(pszDir))
     {
         //get the file name
@@ -144,6 +148,8 @@ int main(int argc, char **argv)
             year = match_str.substr(0,4);
             cout<<"month: "<<month<<", day:"<<day<<", year:"<<year<<endl;
         } 
+
+        //If this year doesn't exist in map then add it
         if(maxes.find(year)==maxes.end())
         {
             memset(maxes[year],0,12);
@@ -154,33 +160,42 @@ int main(int argc, char **argv)
        
         //Create object
         PAPI_start(event_set[0]);
-        t0 = PAPI_get_real_nsec();
         Geotiff gtiff(pszFilename);
-        vector<float> data = gtiff.GetRasterBand(1);
-        times[0] += PAPI_get_real_nsec() - t0;
         PAPI_stop(event_set[0], file_read_counters);
+        data.push_back(gtiff.GetRasterBand(1));
+    }   
+    times[0] += PAPI_get_real_nsec() - t0;
+    
+
+    /////////do processing///////
+    t0 = PAPI_get_real_nsec();
+    //first need to convert counts to actual data values and throw out bounadry values
+    size_t tot_size =  0;
+    for(vector<float> vec: data)
+    {
         
-        //do processing
-        Image img(data, gtiff.GetDimensions());
-        //iterate over the data doing processing
-        float max_ndvi = -numeric_limits<float>::max();
-        float min_ndvi = numeric_limits<float>::max();
-        float mean = 0, count =0;
-        PAPI_start(event_set[1]);
-        t0 = PAPI_get_real_nsec();
-        for(float &ndvi : img.vec){
-            max_ndvi = ndvi>max_ndvi ? ndvi : max_ndvi;
-            min_ndvi = ndvi<min_ndvi ? ndvi : min_ndvi;
-            mean += ndvi;
-            count+=1;
-        }
-        times[1] += PAPI_get_real_nsec() - t0;
-        PAPI_stop(event_set[1], processing_counters);
-        maxes[year][month-1] = max_ndvi>maxes[year][month-1] ? max_ndvi : maxes[year][month-1];        
-        mins[year][month-1] = min_ndvi>mins[year][month-1] ? min_ndvi : mins[year][month-1];
-        means[year][month-1] += mean;
-        counts[year][month-1] += count;
-        //std::cout<<"\n Max NDVI: "<<max_ndvi<<std::endl;
+    }
+
+    Image img(data, gtiff.GetDimensions());
+    //iterate over the data doing processing
+    float max_ndvi = -numeric_limits<float>::max();
+    float min_ndvi = numeric_limits<float>::max();
+    float mean = 0, count =0;
+    PAPI_start(event_set[1]);
+    t0 = PAPI_get_real_nsec();
+    for(float &ndvi : img.vec){
+        max_ndvi = ndvi>max_ndvi ? ndvi : max_ndvi;
+        min_ndvi = ndvi<min_ndvi ? ndvi : min_ndvi;
+        mean += ndvi;
+        count+=1;
+    }
+    times[1] += PAPI_get_real_nsec() - t0;
+    PAPI_stop(event_set[1], processing_counters);
+    maxes[year][month-1] = max_ndvi>maxes[year][month-1] ? max_ndvi : maxes[year][month-1];        
+    mins[year][month-1] = min_ndvi>mins[year][month-1] ? min_ndvi : mins[year][month-1];
+    means[year][month-1] += mean;
+    counts[year][month-1] += count;
+    //std::cout<<"\n Max NDVI: "<<max_ndvi<<std::endl;
     }
     
     cout<<"\nNDVI trends:"<<endl;
