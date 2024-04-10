@@ -4,7 +4,7 @@
 #include <numeric>
 #include <filesystem>
 #include <regex>
-//#include <ofstream>
+#include <fstream>
 
 //Just a wrapper to index 2D image stored as flat array
 class Image
@@ -33,7 +33,7 @@ class Image
 };
 
 
-void output_profile( long long int counters[4], long long int dt)
+void output_profile( long long int counters[4], long long int dt, double &MPT, double &IPB)
 {
     long long total_cycles = counters[0];       // cpu cycles
     const long long total_instructions = counters[1]; // any
@@ -49,13 +49,16 @@ void output_profile( long long int counters[4], long long int dt)
     //const double OI_theory =
     //                    static_cast<double>(flops) / (mem_ops * sizeof(float));
     const double float_perf = flops / twall * 1.0e-9; // Gflop/s
+    MPT += static_cast<double>(total_load_stores)*sizeof(float) / twall; //mem op /s 
+    IPB += static_cast<double>(total_instructions)/static_cast<double>(total_load_stores)/sizeof(float);
 
     std::cout<< "twall:                         " << twall << '\n';
     std::cout << "Total cycles:                 " << total_cycles << '\n';
     std::cout << "Total instructions:           " << total_instructions << '\n';
     std::cout << "Instructions per cycle (IPC): " << IPC << '\n';
-    std::cout << "Float performance:            " << float_perf <<'\n';
-   
+    //std::cout << "Bandwidth: (Byte/s):          " << MPT << '\n';
+    //std::cout << "Instructions per byte:        " << IPB << '\n';
+    //std::cout << "Float performance:            " << float_perf <<'\n'; 
     return;
 }
 
@@ -73,6 +76,20 @@ enum months{
     Nov,
     Dec
 };
+
+
+void write_to_file(map<string, float[12]> maxes, string filename)
+{
+    ofstream ofile(filename.c_str()); 
+    ofile << "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec"<<endl;
+    for( auto y : maxes){
+        for(auto m : y.second)
+            ofile << m <<" ";
+        ofile<<endl;
+    }
+    ofile.close();
+}
+
 
 int main(int argc, char **argv)
 {   
@@ -129,10 +146,10 @@ int main(int argc, char **argv)
         } 
         if(maxes.find(year)==maxes.end())
         {
-            memset(maxes[year],0,12);// = {0,0,0,0,0,0,0,0,0,0,0,0};
-            memset(means[year],0,12);// = {0,0,0,0,0,0,0,0,0,0,0,0};
-            memset(counts[year],0,12);// = {0,0,0,0,0,0,0,0,0,0,0,0};
-            memset(mins[year],0,12);// = {0,0,0,0,0,0,0,0,0,0,0,0};
+            memset(maxes[year],0,12);
+            memset(means[year],0,12);
+            memset(counts[year],0,12);
+            memset(mins[year],0,12);
         }
        
         //Create object
@@ -151,7 +168,7 @@ int main(int argc, char **argv)
         float mean = 0, count =0;
         PAPI_start(event_set[1]);
         t0 = PAPI_get_real_nsec();
-        for(float ndvi : img.vec){
+        for(float &ndvi : img.vec){
             max_ndvi = ndvi>max_ndvi ? ndvi : max_ndvi;
             min_ndvi = ndvi<min_ndvi ? ndvi : min_ndvi;
             mean += ndvi;
@@ -171,23 +188,33 @@ int main(int argc, char **argv)
         string year = N.first;
         cout<<"Year:"<<year<<"\n";
         for(int m=0;m<12;m++){
-            cout<<"Month:"<<m+1<<", max ndvi: "<<N.second[m]<<", mean:"<<means[year][m]/counts[year][m]<<", min:"<<mins[year][m]<<endl;    
+            if(counts[year][m]>0)
+                cout<<"Month:"<<m+1<<", max ndvi: "<<N.second[m]<<", mean:"<<means[year][m]/counts[year][m]<<", min:"<<mins[year][m]<<endl;    
         }
     }
-   
-    std::cout<<"\nReading files time:"<<std::endl;
-    output_profile(file_read_counters, times[0]);
+    
+    double MPT=0, IPB=0; 
+    std::cout<<"\nGDAL Geotiff initialization:"<<std::endl;
+    output_profile(file_read_counters, times[0],MPT,IPB);
     
     //profile processing the data
-    std::cout<<"\nData reduction time:"<<std::endl;
-    output_profile(processing_counters, times[1]);
+    std::cout<<"\nData reduction:"<<std::endl;
+    output_profile(processing_counters, times[1],MPT, IPB);
+    
+    double total_time = (static_cast<double>(times[0]) + static_cast<double>(times[1])) * 1e-9;
+    cout<<"\nTotals:\n";
+    cout << "Execution time:"<<total_time<<"s, GDAL init("<<times[0]/total_time*100*1e-9<<"%), Reduction("<<times[1]/total_time*100*1e-9<<"%)\n";     
+    cout << "Traffic: (Byte/s):            " << MPT << '\n';
+    cout << "Instructions per byte:        " << IPB << '\n';
  
     //std::cout<<"\nMax NDVI: "<<std::endl; 
     //for(float m : maxes) std::cout<<m<<", ";
     //std::cout<<std::endl;
     
     //Write out a text file which has timing data so python can use it
-     
+    write_to_file(maxes, "maxes.txt");
+    write_to_file(means, "means.txt");
+    write_to_file(mins, "mins.txt");
 
     return 1;
 }
