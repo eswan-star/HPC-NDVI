@@ -31,7 +31,9 @@ fi
 
 #now build and install gdal
 cd ${GDAL_DIR}/build
-rm CMakeCache.txt
+if [ -f CMakeCache.txt ]
+	rm CMakeCache.txt
+fi
 cmake .. -DCMAKE_INSTALL_PREFIX=${GDAL_DIR} -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF\
                 -DPROJ_DIR=${PROJ_DIR} -DPROJ_INCLUDE_DIR=${PROJ_DIR}/include -DPROJ_LIBRARY=${PROJ_DIR}/lib64 -DCMAKE_BUILD_TYPE=Release
 cmake --build . 
