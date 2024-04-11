@@ -32,6 +32,7 @@ fi
 #now build and install gdal
 cd ${GDAL_DIR}/build
 if [ -f CMakeCache.txt ]
+then
 	rm CMakeCache.txt
 fi
 cmake .. -DCMAKE_INSTALL_PREFIX=${GDAL_DIR} -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF\

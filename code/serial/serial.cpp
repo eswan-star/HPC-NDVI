@@ -43,6 +43,7 @@ void write_to_file(map<int, map<int,float>> maxes, string filename)
         ncols = y.second.size();   
         break;
     }
+    ofile << "year" << " ";
     for(size_t i=0;i<ncols;i++)
         ofile << months[i] << " ";
     ofile<<endl; 
@@ -244,14 +245,14 @@ int main(int argc, char **argv)
     // now generate resulting time series
     int LKmin = min(L, N-L+1), LKmax = max(L, N-L+1);
     int Npc = s.size();
-    vector<float> results(N*Npc);
+    vector<float> results(N*Npc,0);
     for(int pc=0; pc<Npc; pc++){
         //reconstruct pc from U(:,pc)*s(pc)*V(:,pc)^T
         float sv = s(pc);
         for(int col=0;col<K;col++){
-            float v = V(pc,col);
+            float v = V(col,pc);
             for(int row=0; row<L; row++)
-                results[pc*N+row+col] = sv*U(row,pc)*v;
+                results[pc*N+row+col] += sv*U(row,pc)*v;
         }
         //do anti-diagonal averaging
         for(int l=0;l<LKmin;l++)
@@ -276,14 +277,14 @@ int main(int argc, char **argv)
     PAPI_stop(event_set[0], output_counters); 
 
     /************std::cout output for us that we don't want to profile***********/
-    /*cout<<"\nNDVI trends:"<<endl;
+    cout<<"\nNDVI trends:"<<endl;
     for(auto &M : maxes){
         int year = M.first;
         cout<<"Year:"<<year<<"\n";
         for(auto &m : M.second){
             cout<<"Month:"<<m.first<<", max ndvi: "<<m.second<<", mean:"<<means[year][m.first]<<", min:"<<mins[year][m.first]<<endl;    
         }
-    }*/
+    }
 
     double FLOPS=0, TRAFFIC=0; 
     std::cout<<"\nFileReading:"<<std::endl;
