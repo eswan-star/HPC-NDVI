@@ -23,6 +23,7 @@ class Geotiff {
     double geotransform[6];      // 6-element geotranform array.
     int dimensions[3];           // X,Y, and Z dimensions. 
     int NROWS,NCOLS,NLEVELS;     // dimensions of data in Geotiff. 
+    vector<float> bandLayer;
 
   public: 
      
@@ -111,7 +112,7 @@ class Geotiff {
       return dimensions;  
     } 
  
-   vector<float> GetRasterBand(int z) {
+   vector<float>& GetRasterBand(int z) {
  
       /*
        * function float** GetRasterBand(int z): 
@@ -131,7 +132,7 @@ class Geotiff {
       //float** bandLayer = new float*[NROWS];
       switch( GDALGetRasterDataType(geotiffDataset->GetRasterBand(z)) ) {
         case 0:
-          return vector<float>(); // GDT_Unknown, or unknown data type.
+          return bandLayer; // GDT_Unknown, or unknown data type.
         case 1:
           // GDAL GDT_Byte (-128 to 127) - unsigned  char
           return GetArray2D<unsigned char>(z);//,bandLayer); 
@@ -156,11 +157,11 @@ class Geotiff {
         default:     
           break;  
       }
-      return vector<float>();  
+      return bandLayer;  
     }
  
     template<typename T>
-    vector<float> GetArray2D(int layerIndex) {
+    vector<float>& GetArray2D(int layerIndex) {
  
        /*
         * function float** GetArray2D(int layerIndex): 
@@ -191,7 +192,7 @@ class Geotiff {
        T *rowBuff = (T*) malloc(nbytes*NCOLS);
  
        //allocate the total storage that will be needed to store image
-       vector<float> bandLayer(NROWS*NCOLS); 
+       bandLayer.resize(NROWS*NCOLS); 
 
        for(int row=0; row<NROWS; row++) {   // iterate through rows
  
