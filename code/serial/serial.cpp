@@ -113,9 +113,8 @@ int main(int argc, char **argv)
     //Get the filename "either a default or specified from command line"
     const char* pszFilename;
     const char* pszDir;
-    if(argc==1)
-        pszFilename = "NDVI_50_20231204_20231217_clip_20240407113518_2047798237.tif";
-    else if(argc==2)
+
+    if(argc==2)
         pszDir = argv[1];
     else
         return EINVAL;
@@ -221,7 +220,7 @@ int main(int argc, char **argv)
     }
     PAPI_accum(event_set[0], processing_counters);
     times[1] += PAPI_get_real_nsec() - t0;
-    if(cnt!=tot_ndvi.size()) throw(runtime_error("map loop doesn't match files read!\n")); //check we don't want to profile    
+    //if(cnt!=tot_ndvi.size()) throw(runtime_error("map loop doesn't match files read!\n")); //check we don't want to profile    
  
     /*********************************now do the SSA*****************************/
     t0 = PAPI_get_real_nsec();
@@ -254,7 +253,7 @@ int main(int argc, char **argv)
             for(int row=0; row<L; row++)
                 results[pc*N+row+col] = sv*U(row,pc)*v;
         }
-        //do diagonal averaging
+        //do anti-diagonal averaging
         for(int l=0;l<LKmin;l++)
             results[pc*N+l] /= l+1;
         for(int l=LKmin; l<LKmax; l++)
