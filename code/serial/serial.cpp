@@ -45,8 +45,9 @@ void write_to_file(map<int, map<int,float>> maxes, string filename)
     }
     for(size_t i=0;i<ncols;i++)
         ofile << months[i] << " ";
-        
+    ofile<<endl; 
     for( auto y : maxes){
+        ofile << y.first << " ";
         for(auto m : y.second)
             ofile << m.second <<" ";
         ofile<<endl;
@@ -89,19 +90,19 @@ struct  DateContainer
    }   
 };
 
-void output_profile( long long int counters[4], long long int dt, double &FLOPS, double &TRAFFIC)
+void output_profile( long long int counters[4], long long int dt)
 {
-    long long flops   = counters[1];       // cpu cycles
-    long long traffic = counters[2]*sizeof(float); // any
+    long long sflops = counters[0];      
+    long long dflops = counters[1]; 
+    long long traffic = counters[2]*sizeof(float); 
     long long total_l1d_cache_misses = counters[3];  // number of such instructions
     
     double twall = static_cast<double>(dt) * 1.0e-9; // seconds
-    FLOPS   += flops;  
-    TRAFFIC += traffic;
     cout << "Wall time(s):                 " << twall << '\n';
-    cout << "Flops:                        " << flops << '\n';
-    cout << "Traffic:                      " << traffic << '\n';
-    cout << "Operational Intensity:        " << static_cast<double>(flops)/traffic << '\n';
+    cout << "Flops (Single prec):          " << sflops << '\n';
+    cout << "Flops (Double prec):          " << dflops << '\n';
+    cout << "Traffic (bytes):              " << traffic << '\n';
+    cout << "Operational Intensity:        " << static_cast<double>(sflops)/traffic << '\n';
     cout << "L1d Cache Misses:             " << total_l1d_cache_misses << '\n'; 
     return;
 }
@@ -121,18 +122,19 @@ int main(int argc, char **argv)
 
     //profiling stuff
     int event_set[2] = {PAPI_NULL, PAPI_NULL};
-    int events[4]    = {PAPI_TOT_CYC, PAPI_SP_OPS, PAPI_LST_INS, PAPI_L1_DCM};
-    //int events2[3]   = {PAPI_FP_OPS, PAPI_LST_INS, PAPI_L1_DCM};
+    int events[4]    = {PAPI_SP_OPS, PAPI_DP_OPS, PAPI_LST_INS, PAPI_L1_DCM};
+    //int memevents[1] = {PAPI_LST_INS};
     long long int file_read_counters[4]  = {0,0,0,0};
     long long int processing_counters[4] = {0,0,0,0};
     long long int ssa_counters[4] = {0,0,0,0};
     long long int output_counters[4] = {0,0,0,0};
-
+    //long long int total_lst_ins=0;
+ 
     PAPI_library_init(PAPI_VER_CURRENT);
     PAPI_create_eventset(&event_set[0]);
-    PAPI_add_events(event_set[0], events, 4);
     //PAPI_create_eventset(&event_set[1]);
-    //PAPI_add_events(event_set[1], events, 4); 
+    PAPI_add_events(event_set[0], events, 4);
+    //PAPI_add_events(event_set[1], memevents, 4); 
     long long int t0;
     long long int times[4] = {0,0,0,0};
 
@@ -153,7 +155,7 @@ int main(int argc, char **argv)
         pszFilename = tmp.c_str();
     
         //get a sense of what date this is from the file name
-        regex pattern("202\\d{5}_");
+        regex pattern("20\\d{6}_");
         auto wbegin = sregex_iterator(tmp.begin(), tmp.end(), pattern);           
         auto wend = sregex_iterator();
         string year, month, day;
@@ -172,20 +174,22 @@ int main(int argc, char **argv)
         Geotiff gtiff(pszFilename);
         data.add(year, month, day, gtiff.GetRasterBand(1));
         tot_nel_read += data(year, month, day).size();
+        //cout<<"tot_nel_read:"<<tot_nel_read<<endl;
     }   
     //PAPI_stop(event_set[0], file_read_counters);
     PAPI_accum(event_set[0], file_read_counters);
     times[0] += PAPI_get_real_nsec() - t0;
-
+    
+    //cout<<"starting processing: N:"<<data.size<<endl;
     /***************************do processing******************************/
     //first need to convert counts to actual data values and throw out boundary values
     //form time series for total NDVI while we do this.
-    vector<float> tot_ndvi(data.size,0); 
+    vector<float> tot_ndvi(data.size); 
     //loop over images 
     vector<tuple<int,int,int>> dates;
     size_t cnt=0;
     t0 = PAPI_get_real_nsec();
-    //PAPI_start(event_set[1]);
+    //PAPI_start(event_set[0]);
     for(auto &yearv : data.images){
         int year = yearv.first;
         for(auto &monthv : yearv.second){
@@ -215,15 +219,16 @@ int main(int argc, char **argv)
             means[year][month] = mean/dc;  
         }
     }
-   PAPI_accum(event_set[0], processing_counters);
+    PAPI_accum(event_set[0], processing_counters);
     times[1] += PAPI_get_real_nsec() - t0;
     if(cnt!=tot_ndvi.size()) throw(runtime_error("map loop doesn't match files read!\n")); //check we don't want to profile    
  
     /*********************************now do the SSA*****************************/
     t0 = PAPI_get_real_nsec();
+    //PAPI_start(event_set[0]);
     //form trajectory matrix
     int N = tot_ndvi.size();
-    int L = int(N/3);
+    int L = int(N/2);
     int K = N-L+1;
     Eigen::MatrixXf mat(L, K);
     for(int col=0;col<K;col++){
@@ -284,18 +289,20 @@ int main(int argc, char **argv)
     double FLOPS=0, TRAFFIC=0; 
     std::cout<<"\nFileReading:"<<std::endl;
     cout<<"Total elements read:"<<tot_nel_read<<", bytes:"<<tot_nel_read*sizeof(float)<<endl;
-    output_profile(file_read_counters, times[0], FLOPS, TRAFFIC);
+    output_profile(file_read_counters, times[0]);
 
     //profile processing the data
     std::cout<<"\nData reduction:"<<std::endl;
-    output_profile(processing_counters, times[1], FLOPS, TRAFFIC);
+    output_profile(processing_counters, times[1]);
 
     cout<<"\nSSA:"<<endl;
-    output_profile(ssa_counters, times[2], FLOPS, TRAFFIC);
+    output_profile(ssa_counters, times[2]);
       
     cout<<"\nOutput:"<<endl;
-    output_profile(output_counters, times[3], FLOPS, TRAFFIC);
-
+    output_profile(output_counters, times[3]);
+    
+    FLOPS = file_read_counters[0] + processing_counters[0] + ssa_counters[0] + output_counters[0];
+    TRAFFIC = (file_read_counters[2] + output_counters[2])*sizeof(float);
     double total_time = static_cast<double>(times[0]+times[1]+times[2]+times[3]) * 1e-9;
     double rel_times[4];
     for(int i=0;i<4;i++)
@@ -303,6 +310,7 @@ int main(int argc, char **argv)
 
     cout<<"\nTotals:\n";
     cout << "Execution time:"<<total_time<<"s, File reading("<<rel_times[0]<<"%), Processing("<<rel_times[1]<<"%), SSA("<<rel_times[2]<<"%), Output("<<rel_times[3]<<"%)\n";     
+    //cout << "Traffic1: (Bytes):             " << total_lst_ins*sizeof(float) << '\n';
     cout << "Traffic: (Bytes):             " << TRAFFIC << '\n';
     cout << "Flops:                        " << FLOPS << '\n';
     cout << "Opertional Intensity:         " << FLOPS/tot_nel_read/sizeof(float) << '\n';
