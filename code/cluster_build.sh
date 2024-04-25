@@ -1,13 +1,11 @@
-cd ${HOME}/team18_2024/code
-
 #Load needed modules
 spack load python@3.11.6%gcc@7.3.1 cmake@3.27.7%gcc@7.3.1 libtiff@4.5.1 sqlite@3.43.2%gcc@7.3.1 json-c@0.16 hdf5/43gozkm zlib-ng@2.1.4%gcc@7.3.1
 
 export LD_LIBRARY_PATH=/shared/software/spack/opt/spack/linux-amzn2-skylake_avx512/gcc-7.3.1/libtiff-4.5.1-fiyvp24cb4yzjg5cw6bkvh2x4l2s4ehy/lib64/:${LD_LIBRARY_PATH}
 
-CUR_DIR=`pwd`
-PROJ_DIR=${HOME}/team18_2024/code/proj-9.3.1
-GDAL_DIR=${HOME}/team18_2024/code/gdal-3.8.5
+TOP_DIR=`pwd`
+PROJ_DIR=${TOP_DIR}/proj-9.3.1
+GDAL_DIR=${TOP_DIR}/gdal-3.8.5
 
 #install proj if needed
 if [ ! -d ${PROJ_DIR} ] 
@@ -22,6 +20,10 @@ then
 	cmake --build . --target install
 fi
 
+# return to containg directory
+cd ${TOP_DIR}
+
+#now check for gdal and if build if neededd
 if [ ! -d ${GDAL_DIR} ]
 then
 	wget https://github.com/OSGeo/gdal/releases/download/v3.8.5/gdal-3.8.5.tar.gz
@@ -45,4 +47,4 @@ cmake --build .
 cmake --build . --target install
 
 #go back where we started
-cd ${CUR_DIR}
+cd ${TOP_DIR}
