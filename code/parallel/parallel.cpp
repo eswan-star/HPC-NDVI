@@ -10,6 +10,7 @@
 #include <x86intrin.h>
 #include <stdalign.h>
 #include <cstring>
+#include "transforms.hpp"
 
 //Just a wrapper to index 2D image stored as flat array
 class Image
@@ -46,9 +47,9 @@ class Image
             mean = 0;
 	    for(int i=0; i<Nrow;++i){
 		for(int j=0;j<Ncol;++j){
-		    int idx = row*Ncol+col;
+		    int idx = i*Ncol+j;
 	            if(data[idx]<255){
-                        data[idx] = (val-125)/125.0;
+                        data[idx] = (data[idx]-125)/125.0;
                         mean += data[idx]; 
 			++cnt;	
                     }
@@ -59,7 +60,7 @@ class Image
 	    mean /= cnt;
 	    for(int i=0;i<Nrow;++i)
 	        for(int j=0;j<Ncol;++j){
-		    int idx = row*Ncol+col;
+		    int idx = i*Ncol+j;
 		    data[idx] = (data[idx]-mean)/mean;
 		}
 	    return;

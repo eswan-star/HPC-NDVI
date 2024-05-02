@@ -10,7 +10,7 @@ LFLAGS=-lgdal -lm -lpapi -lstdc++fs -lturbojpeg
 all: parallel
 
 parallel:  
-	$(CXX) -o $@ parallel.cpp ${CPPFLAGS} ${LDFLAGS} ${LFLAGS}
+	$(CXX) -o $@ parallel.cpp transforms.cpp  ${CPPFLAGS} ${LDFLAGS} ${LFLAGS}
 
 clean:
 	rm parallel

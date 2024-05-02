@@ -69,7 +69,7 @@ then
 fi
 
 #build targets
-cd serial/
+cd parallel/
 make
 
 cd ${TOP_DIR}
