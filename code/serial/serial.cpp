@@ -2,7 +2,7 @@
 #include <algorithm>
 #include "papi.h"
 #include <numeric>
-#include <filesystem>
+#include <experimental/filesystem>
 #include <regex>
 #include <fstream>
 #include <eigen3/Eigen/Dense>
@@ -148,7 +148,7 @@ int main(int argc, char **argv)
     size_t tot_nel_read=0;
     t0 = PAPI_get_real_nsec();
     PAPI_start(event_set[0]);
-    for(const auto& pszFname : filesystem::recursive_directory_iterator(pszDir))
+    for(const auto& pszFname : experimental::filesystem::recursive_directory_iterator(pszDir))
     {
         //get the file name
         string tmp = pszFname.path().string();
