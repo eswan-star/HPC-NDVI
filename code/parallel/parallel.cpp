@@ -7,18 +7,20 @@
 #include <fstream>
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/SVD>
+#include <x86intrin.h>
+#include <stdalign.h>
+#include <cstring>
 
 //Just a wrapper to index 2D image stored as flat array
 class Image
 {
-    private:
-        int Nrow;
-        int Ncol;
-       
     public:
         vector<float> vec;
         float *data;
-        
+        float mean;
+	int Nrow;
+	int Ncol;
+
         Image(vector<float> &_data, int _dims[2])
         {
             //get image dimensions
@@ -26,11 +28,46 @@ class Image
             Ncol = _dims[1];
             data = _data.data();    
             vec = _data;
+	    mean = -numeric_limits<float>::max();
         }
+
+	Image(vector<float> &_data, int Nr, int Nc)
+	{
+            Nrow = Nr;
+            Ncol = Nc;
+            data = _data.data();    
+            vec = _data;
+	    mean = -numeric_limits<float>::max();
+	}
+	
+	void convert_to_delta(void)
+	{
+	    int cnt = 0;
+            mean = 0;
+	    for(int i=0; i<Nrow;++i){
+		for(int j=0;j<Ncol;++j){
+		    int idx = row*Ncol+col;
+	            if(data[idx]<255){
+                        data[idx] = (val-125)/125.0;
+                        mean += data[idx]; 
+			++cnt;	
+                    }
+	            else
+			data[idx] = 0;
+		}
+	    }
+	    mean /= cnt;
+	    for(int i=0;i<Nrow;++i)
+	        for(int j=0;j<Ncol;++j){
+		    int idx = row*Ncol+col;
+		    data[idx] = (data[idx]-mean)/mean;
+		}
+	    return;
+	}
 
         float &operator()(int row, int col)
         {
-            return data[row+col*Nrow]; //col major order (to match eigen)
+            return data[row*Ncol+col]; 
         }
 };
 
@@ -69,7 +106,7 @@ void write_binary(float* data, int N, int Npc, string fname)
 //just organizes images by date
 struct  DateContainer
 {
-   map<int, map<int, map<int, vector<float>>>> images;
+   map<int, map<int, map<int, Image>>> images;
    size_t size = 0;
 
    //accesses image(s) for particular year/month/day
@@ -78,12 +115,12 @@ struct  DateContainer
    }
 
    //accesses image(s) for particular year/month/day
-   vector<float> &operator()(string year, string month, string day){
+   Image &operator()(string year, string month, string day){
         return images[atoi(year.c_str())][atoi(month.c_str())-1][atoi(day.c_str())];
    }
 
    //add image while keeping count of how many you've added
-   void add(string year, string month, string day, vector<float> & addv)
+   void add(string year, string month, string day, Image & addv)
    {
         images[atoi(year.c_str())][atoi(month.c_str())-1][atoi(day.c_str())] = addv;
         size++;
@@ -108,6 +145,117 @@ void output_profile( long long int counters[4], long long int dt)
     return;
 }
 
+#define PI2 6.28318530717958
+
+#define set_mm512(cos,l,n)\
+    _mm512_set_ps(cos((l)*(n+15)*PI2/Nc),cos((l)*(n+14)*PI2/Nc),cos((l)*(n+13)*PI2/Nc),\
+		  cos((l)*(n+12)*PI2/Nc),cos((l)*(n+11)*PI2/Nc),cos((l)*(n+10)*PI2/Nc),\
+                  cos((l)*(n+9)*PI2/Nc),cos((l)*(n+8)*PI2/Nc),cos((l)*(n+7)*PI2/Nc),\
+                  cos((l)*(n+6)*PI2/Nc),cos((l)*(n+5)*PI2/Nc),cos((l)*(n+4)*PI2/Nc),\
+                  cos((l)*(n+3)*PI2/Nc),cos((l)*(n+2)*PI2/Nc),cos((l)*(n+1)*PI2/Nc),\
+	          cos((l)*(n)*PI2/Nc));
+
+#define PIPL_CHUNK 7
+#define SIMD_CUNK 16
+
+#define GET_F_COL\
+    f_col[0] = set_mm512(cos,l,n)\
+    f_col[1] = set_mm512(cos,l+1,n)\
+    f_col[2] = set_mm512(cos,l+2,n)\
+    f_col[3] = set_mm512(cos,l+3,n)\
+    f_col[4] = set_mm512(cos,l+4,n)\
+    f_col[5] = set_mm512(cos,l+5,n)\
+    f_col[6] = set_mm512(cos,l+6,n)
+
+#define ACCUMULATE\
+    accum[0] = _mm512_fmadd(img_slice, f_col[0], accum[0]);\
+    accum[1] = _mm512_fmadd(img_slice, f_col[1], accum[1]);\
+    accum[2] = _mm512_fmadd(img_slice, f_col[2], accum[2]);\
+    accum[3] = _mm512_fmadd(img_slice, f_col[3], accum[3]);\
+    accum[4] = _mm512_fmadd(img_slice, f_col[4], accum[4]);\
+    accum[5] = _mm512_fmadd(img_slice, f_col[5], accum[5]);\
+    accum[6] = _mm512_fmadd(img_slice, f_col[6], accum[6]);
+
+void inline right_transform(float *img_data, int &Nr, int &Nc, int &Nt)
+{
+    float row_tmp[Nc];
+    __mm512 img_slice, f_col[PIPL_CHUNK], accum[PIPL_CHUNK], mask; 
+    int lstop = floor(Nc/PIPL_CHUNK);
+    int nstop = floor(Nc/SIMD_CHUNK);
+    for(int m=0; m<Nr; m++)
+    { 
+	    //zero temporary memory used for storing row fo result 
+	    memset(row_tmp,0,sizeof(float)*Nc);
+	    for(l=0;l<lstop;l+=PIPL_CHUNK)
+	    {   
+		//zero accumulators
+		for(int i=0;i<PIPL_CHUNK;++i)
+			accum[i] = _mm512_set1_ps(0.0);
+		//do chunked loop
+		for(int n=0;n<nstop; n+=SIMD_CHUNK)
+		{
+		    //load image slice
+		    img_slice = _mm512_load_ps(img_data[m*Nc+n]);
+		    //get chunk of transform-matrix
+		    GET_F_COL
+			    
+		    //multiply with row and store
+		    ACCUMULTATE
+		}
+
+		//do remainder
+		int rem = Nc - nstop;
+		float msk[SIMD_CHUNK];
+		memset(msk,0,SIMD_CHUNK*sizeof(float));
+		for(int m=0;m<=rem;m++)
+		    msk[m] = 1;
+		mask = _mm512_load_ps(msk);
+		img_slice =_mm512_load_ps(img_data[m*Nc+n]);
+		img_slice = _mm512_mult_ps(img_slice, mask);
+		GET_F_COL
+		ACCUMULATE
+		
+		//do final horizontal add and write to dest 
+		float tmp[SIMD_CHUNK];
+		for(int i=0;i<PIPL_CHUNK;++i){
+		    _mm512_store_ps(tmp, accum[l+i]);
+		    row_tmp[l+i] = tmp[0]+tmp[1]+tmp[2]+tmp[3]+tmp[4]+tmp[5]+
+			tmp[6]+tmp[7]+tmp[8]+tmp[9]+tmp[10]+tmp[11]+tmp[12]+
+			tmp[13]+tmp[14]+tmp[15];
+		}
+		
+	    }
+	    //now need to do all of the above but when there's less than PIPL_CHUNK columns left
+	    //for now do in loop b/c can't know remaining dimensions until runtime. 
+	    for(l=lstop;l<Nc;l++){
+		accum[0] = _mm512_set1_ps(0.0);
+		int nstop = floor(Nc/SIMD_CHUNK);
+		for(int n=0;n<nstop;n+=SIMD_CHUNK){
+		    img_slice = _mm512_load_ps(img_data[m*Nc+n]);
+		    f_col[0] = set_mm512(cos,l,n)
+		    accum[0] = _mm512_fmadd(img_slice, f_col[0], accum[0]);
+		}
+		int rem = Nc - nstop;
+		float msk[SIMD_CHUNK];
+		memset(msk,0,SIMD_CHUNK*sizeof(float));
+		for(int m=0;m<=rem;m++)
+		    msk[m] = 1;
+		mask = _mm512_load_ps(msk);
+		img_slice =_mm512_load_ps(img_data[m*Nc+n]); //TODO: should be segfault
+		img_slice = _mm512_mult_ps(img_slice, mask);
+		f_col[0] = set_mm512(cos,l,n)
+		accum[0] = _mm512_fmadd(img_slice, f_col[0], accum[0]);
+		float tmp[SIMD_CHUNK];
+		_mm512_store_ps(tmp, accum[0]);
+		row_tmp[l] = tmp[0]+tmp[1]+tmp[2]+tmp[3]+tmp[4]+tmp[5]+
+			tmp[6]+tmp[7]+tmp[8]+tmp[9]+tmp[10]+tmp[11]+tmp[12]+
+			tmp[13]+tmp[14]+tmp[15];
+	    }
+	    //congrats, you've finished a row. Now write it out.
+ 	    memcpy(img_data[m*Nc], row_tmp, Nc*sizeof(float));
+    } 
+    return;
+}
 
 int main(int argc, char **argv)
 {   
@@ -117,10 +265,6 @@ int main(int argc, char **argv)
 
     if(argc==2)
         pszDir = argv[1];
-    else if (argc==3){
-	    std::cout<<"We can run!"<<std::endl;
-	    return 0;
-    }
     else
         return EINVAL;
 
@@ -146,7 +290,7 @@ int main(int argc, char **argv)
     map<int, map<int,float>> maxes;
     map<int, map<int,float>> mins;
     map<int, map<int,float>> means;
-
+    int lst_Nr, lst_Nc;
     /********************************read the files*************************/
     DateContainer data;
     size_t tot_nel_read=0;
@@ -173,10 +317,12 @@ int main(int argc, char **argv)
             //cout<<"month: "<<month<<", day:"<<day<<", year:"<<year<<endl;
         } 
        
-
         //Create object
         Geotiff gtiff(pszFilename);
-        data.add(year, month, day, gtiff.GetRasterBand(1));
+	Image img(gtiff.GetRasterBand(1), gtiff.GetDimensions()).convert_to_delta();
+        lst_Nr = img.Nrow;
+	lst_Nc = img.Ncol;
+	data.add(year, month, day, img); 
         tot_nel_read += data(year, month, day).size();
         //cout<<"tot_nel_read:"<<tot_nel_read<<endl;
     }   
@@ -185,11 +331,10 @@ int main(int argc, char **argv)
     times[0] += PAPI_get_real_nsec() - t0;
     
     //cout<<"starting processing: N:"<<data.size<<endl;
-    /***************************do processing******************************/
-    //first need to convert counts to actual data values and throw out boundary values
-    //form time series for total NDVI while we do this.
-    vector<float> tot_ndvi(data.size); 
-    //loop over images 
+    /***************************do pre-processing******************************/
+    //get the date/loop over images
+    vector<float> img_data; 
+    alignas(64) float *Pk = (double*) malloc(lst_Nr*lst_Nc*Nt*sizeof(float));
     vector<tuple<int,int,int>> dates;
     size_t cnt=0;
     t0 = PAPI_get_real_nsec();
@@ -198,74 +343,34 @@ int main(int argc, char **argv)
         int year = yearv.first;
         for(auto &monthv : yearv.second){
             int month = monthv.first;
-            float max = -numeric_limits<float>::max();
-            float min =  numeric_limits<float>::min();
-            float mean = 0, dc=0;
             for(auto &dayv : monthv.second){
                 int day = dayv.first;
-                float _totndvi = 0, pc=0;
-                for(float &val : dayv.second){
-                    if(val<255){
-                        float tmp = (val-125)/125.0;
-                        _totndvi += tmp;
-                        max = tmp>max ? tmp : max;
-                        min = tmp<min ? tmp : min;
-                        mean += tmp; 
-                        dc++; pc++;               
-                    }
-                }
-                tot_ndvi[cnt] = _totndvi/pc;
-                dates.push_back(make_tuple(year,month,day));
+                //for(float &val : dayv.second){  
+                //}
+		if(lst_Nr!=dayv.second.Nrow or lst_Nc!=dayv.second.Ncol){
+		    free(Pk);
+		    throw::runtime_error("Images inconsistent-sizes across time!\n");
+		}
+		lst_Nr = dayv.second.Nrow;
+		lst_Nc = dayv.second.Ncol;
+		//img_data.insert(img_data.end(), dayv.second.vec.begin(), dayv.second.vec.end());
+                memcpy(Pk[lst_Nr*lst_Nc*cnt], dayv.second.data(),lst_Nr*lst_Nc*sizeof(float));
+		dates.push_back(make_tuple(year,month,day));
                 cnt++;
             }
-            maxes[year][month] = max > maxes[year][month] ? max : maxes[year][month];
-            mins[year][month]  = min < mins[year][month] ? min : mins[year][month];
-            means[year][month] = mean/dc;  
+            //maxes[year][month] = ;
+            //mins[year][month]  = ;
+            //means[year][month] = ;
         }
     }
     PAPI_accum(event_set[0], processing_counters);
     times[1] += PAPI_get_real_nsec() - t0;
-    //if(cnt!=tot_ndvi.size()) throw(runtime_error("map loop doesn't match files read!\n")); //check we don't want to profile    
- 
-    /*********************************now do the SSA*****************************/
-    t0 = PAPI_get_real_nsec();
-    //PAPI_start(event_set[0]);
-    //form trajectory matrix
-    int N = tot_ndvi.size();
-    int L = int(N/2);
-    int K = N-L+1;
-    Eigen::MatrixXf mat(L, K);
-    for(int col=0;col<K;col++){
-        for(int row=0;row<L;row++){
-            mat(row, col) = tot_ndvi[row+col];
-        }
-    }
-    //now do svd
-    Eigen::JacobiSVD<Eigen::MatrixXf> svd(mat,Eigen::ComputeFullU | Eigen::ComputeFullV);
-    Eigen::MatrixXf U = svd.matrixU();
-    Eigen::MatrixXf V = svd.matrixV();
-    Eigen::VectorXf s = svd.singularValues();
 
-    // now generate resulting time series
-    int LKmin = min(L, N-L+1), LKmax = max(L, N-L+1);
-    int Npc = s.size();
-    vector<float> results(N*Npc,0);
-    for(int pc=0; pc<Npc; pc++){
-        //reconstruct pc from U(:,pc)*s(pc)*V(:,pc)^T
-        float sv = s(pc);
-        for(int col=0;col<K;col++){
-            float v = V(col,pc);
-            for(int row=0; row<L; row++)
-                results[pc*N+row+col] += sv*U(row,pc)*v;
-        }
-        //do anti-diagonal averaging
-        for(int l=0;l<LKmin;l++)
-            results[pc*N+l] /= l+1;
-        for(int l=LKmin; l<LKmax; l++)
-            results[pc*N+l] /= LKmin;
-        for(int l=LKmax; l<N;l++)
-            results[pc*N+l] /= (N-l);
-    }
+ 
+    /*********************************now do the correlation function analysis*****************************/
+    t0 = PAPI_get_real_nsec();
+    PAPI_start(event_set[0]);
+    get_Pk_kernel(Pk, lst_Nr, lst_Nc);
     times[2] += PAPI_get_real_nsec() - t0;
     PAPI_accum(event_set[0], ssa_counters);
 
@@ -318,5 +423,7 @@ int main(int argc, char **argv)
     cout << "Traffic: (Bytes):             " << TRAFFIC << '\n';
     cout << "Flops:                        " << FLOPS << '\n';
     cout << "Opertional Intensity:         " << FLOPS/tot_nel_read/sizeof(float) << '\n';
+    
+    free(Pk);
     return 1;
 }
