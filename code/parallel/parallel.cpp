@@ -20,14 +20,12 @@ class Image
 {
     public:
         vector<float> vec;
-        float *data;
         float mean;
 	int Nrow;
 	int Ncol;
 	
 	Image(void)
 	{
-	    data = NULL;
 	    mean = numeric_limits<float>::min();
 	    Nrow=-1;
 	    Ncol=-1;
@@ -38,7 +36,6 @@ class Image
             //get image dimensions
             Nrow = _dims[0];
             Ncol = _dims[1];
-            data = _data.data();    
             vec = _data;
 	    mean = -numeric_limits<float>::max();
         }
@@ -46,8 +43,7 @@ class Image
 	Image(vector<float> &_data, int Nr, int Nc)
 	{
             Nrow = Nr;
-            Ncol = Nc;
-            data = _data.data();    
+            Ncol = Nc;   
             vec = _data;
 	    mean = -numeric_limits<float>::max();
 	}
@@ -59,27 +55,27 @@ class Image
 	    for(int i=0; i<Nrow;++i){
 		for(int j=0;j<Ncol;++j){
 		    int idx = i*Ncol+j;
-	            if(data[idx]<255){
-                        data[idx] = (data[idx]-125)/125.0;
-                        mean += data[idx]; 
+	            if(vec[idx]<255){
+                        vec[idx] = (vec[idx]-125)/125.0;
+                        mean += vec[idx]; 
 			++cnt;	
                     }
 	            else
-			data[idx] = 0;
+			vec[idx] = 0;
 		}
 	    }
 	    mean /= cnt;
 	    for(int i=0;i<Nrow;++i)
 	        for(int j=0;j<Ncol;++j){
 		    int idx = i*Ncol+j;
-		    data[idx] = (data[idx]-mean)/mean;
+		    vec[idx] = (vec[idx]-mean)/mean;
 		}
 	    return;
 	}
 
         float &operator()(int row, int col)
         {
-            return data[row*Ncol+col]; 
+            return vec[row*Ncol+col]; 
         }
 
 	int inline size(void)

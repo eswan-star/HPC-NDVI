@@ -27,13 +27,14 @@ export TURBOJPEG_LIB=/shared/software/spack/opt/spack/linux-amzn2-skylake_avx512
 export LD_LIBRARY_PATH=${GDAL_DIR}/lib64/:${TURBOJPEG_LIB}:${PROJ_DIR}/lib64:${OPENSSL_LIB}:${JSON_LIB}:${PAPI_LIB}:${TIFF_LIB}:${LD_LIBRARY_PATH}
 
 #OMP_PLACES='cores'
+#OMP_NUM_THREADS=18
 
-srun parallel/serial_test  parallel/data/  resultss1_2.txt 1 1
+#parallel/serial_test  parallel/data/  resultss1_2.txt 1 1
 #srun parallel/serial_test  parallel/data/ results12.txt 1 2
-srun parallel/parallel     parallel/data/  results1_2.txt 1 2
+#parallel/parallel     parallel/data/  results1_2.txt 1 2
 #srun parallel/parallel     parallel/data/  results8_1.txt 8 1
 srun parallel/parallel     parallel/data/  results8_2.txt 8 2
-#srun parallel/parallel     parallel/data/  results16_1.txt 16 1
-srun parallel/parallel     parallel/data/  results16_2.txt 16 2
-srun parallel/parallel     parallel/data/  results32_2.txt 32 2
-srun parallel/parallel     parallel/data/ results64_2.txt 64 2
+srun parallel/parallel     parallel/data/  results8_4.txt 8 4
+srun parallel/parallel     parallel/data/  results8_8.txt 8 8
+srun parallel/parallel     parallel/data/  results8_16.txt 8 16
+srun parallel/parallel     parallel/data/ results8_32.txt 8 32
