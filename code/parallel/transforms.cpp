@@ -36,17 +36,36 @@
 
 using namespace std;
 
+void right_transform_serial(float * __restrict__ img_data, const int &Nt, const int &Nr, const int &Nc) {
+  for (int t = 0; t < Nt; t++) {
+    for (int r = 0; r < Nr; r++) {
+      float elt = 0; 
+      for (int c = 0; c < Nc; c++) {
+        for (int i = 0; i < Nc; i++) {
+          elt += img_data[t * Nr * Nc + r * Nc + i] * cos(PI2*i*c/Nc);
+        }   
+        img_data[t * Nr * Nc + r * Nc + c] = elt;
+      }
+      
+    }
+  }
+}
+
+//assumes Nc is multiple of 16 or padded to satisfy that requirement (for alignment)
 void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr, const int &Nc)
-{
- 
+{    
+    #pragma omp parallel
+    {
     alignas(64) float row_tmp[Nc];
     alignas(64) float img_data_tmp[Nc];
     __m512 img_slice, mask;
     __m512 f_col[PIPL_CHUNK], accum[PIPL_CHUNK]; 
     int lstop = floor((float)Nc/PIPL_CHUNK)*PIPL_CHUNK;
     int nstop = floor((float)Nc/SIMD_CHUNK)*SIMD_CHUNK; 
+
     for(int T=0; T<Nt; ++T)
     {
+	    #pragma omp for nowait
 	    for(int m=0; m<Nr; m++)
 	    { 
 		    //zero temporary memory used for storing row for result 
@@ -69,7 +88,8 @@ void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr
 			    //multiply with row and store
 			    ACCUMULATE()
 			}
-			
+		        
+		        /*	
 			//Do remainder
 			int rem = Nc - nstop;
 			alignas(64) float msk[SIMD_CHUNK];
@@ -93,7 +113,8 @@ void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr
 			    row_tmp[l+li] = tmp[0]+tmp[1]+tmp[2]+tmp[3]+tmp[4]+tmp[5]+
 				tmp[6]+tmp[7]+tmp[8]+tmp[9]+tmp[10]+tmp[11]+tmp[12]+
 				tmp[13]+tmp[14]+tmp[15];
-			}	
+			}
+                        */
 		    }
 		    //now need to do all of the above but when there's less than PIPL_CHUNK columns left
 		    //for now do in loop b/c can't know remaining dimensions until runtime.  
@@ -119,8 +140,43 @@ void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr
 		    //congrats, you've finished a row. Now write it out.
 		    memcpy(&img_data[T*Nr*Nc + m*Nc], row_tmp, Nc*sizeof(float));
 	    }
+    }
     } 
     return;
+}
+
+
+//assumes Nc is multiple of 16 (or zero padded to satisfy that.)
+void left_transform(float *__restrict__ img_data, const int &Nt, const int&Nr, const int&Nc)
+{
+    //ACJ: outer loop for time 
+    #pragma omp parallel
+    {
+       __m512 img_slice, accum, f_mk; 
+       alignas(64) float mat_row[Nc];// = (float*)malloc(Nr*Nc*sizeof(float));
+       int chunk = 32768/(2.0*sizeof(float)); //chunk size to fit in cache
+	for(int T=0; T<Nt; T++)
+        { 
+            memset(mat_row,0,sizeof(float)*Nc*Nr);
+            #pragma omp for nowait //don't need to synchronize because threads touch different mem 
+            for(size_t m=0;m<Nr;m++)
+            {    
+                for(size_t k=0;k<Nr;k++)
+                {
+		    f_mk = _mm_set1_ps(F(cos,m,k,Nr));
+		    for(size_t n=0;n<Nc;n+=SIMD_CHUNK)
+                    {
+                        img_slice = _mm512_load_ps(&img_data[T*Nr*Nc + k*Nc +n]);
+			img_slice = _mm512_mul(f_mk, img_slice);
+			accum = _mm512_load_ps(&mat_tmp[m*Nc+n]);
+			accum = _mm512_add_ps(img_slice, accum);
+			_mm512_store_ps(&mat_row[n], accum);
+                    }     
+               }
+	       memcpy(&img_data[T*Nr*Nc + m*Nc], mat_row, Nc*sizeof(float));
+            }
+	}
+    }		
 }
 
 
@@ -146,7 +202,7 @@ void left_transform_serial(float* __restrict__ img_data, const int &Nt, const in
                         float f_mk = F(cos,m,k,Nr);
                         for(size_t n=start;n<stop;n++)
                         {
-                            mat_tmp[m*Nc+n] += f_mk*img_data[T*Nr*Nc + m*Nc + n];
+                            mat_tmp[m*Nc+n] += f_mk*img_data[T*Nr*Nc + k*Nc + n];
                         } 
                     }
                 start = stop;
@@ -167,12 +223,12 @@ void get_Pk_kernel(float*__restrict__ img_data, const int &Nt, const int &Nr, co
    cout<<"Right transform."<<endl;
    right_transform(img_data, Nt, Nr, Nc);
    cout<<"Left transform."<<endl;
-   left_transform_serial(img_data, Nt, Nr, Nc);
+   left_transform(img_data, Nt, Nr, Nc);
 }
 
 void get_Pk_kernel_serial(float*__restrict__ img_data, const int &Nt, const int &Nr, const int &Nc)
 {
-   right_transform(img_data, Nt, Nr, Nc);
+   right_transform_serial(img_data, Nt, Nr, Nc);
    left_transform_serial(img_data, Nt, Nr, Nc); 
 }
 

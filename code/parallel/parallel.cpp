@@ -124,24 +124,24 @@ struct  DateContainer
    }   
 };
 
-void write_analysis(long long int Pk_counters[2], float twall, float twall_rel[4],  float traffic, 
-		float Tp_sec, float Ts_sec, size_t Ws, float Ts, size_t Wp, float Tp, String filename)
+void write_analysis(long long int Pk_counters[2], long long int Pk_counters_serial[2], float twall, float twall_rel[4], 
+		float Tp_sec, float Ts_sec, float Wp, float Tp, float Ws, float Ts, String filename)
 {
     ofstream ofile(filename.c_str()); 
-    ofile << "Wall time(s):            "<< twall << endl;
+    ofile << "Wall time (s):           "<< twall << endl;
     //Gflop/s
     float gflops = (Pk_counters[0] + Pk_counters[1]) / twall;
     ofile << "Performance (Gflops/s):  "<<gflops<<endl;
     //percent of peak
     ofile << "frac peak perf:          "<<gflops/3340<<"%"<<endl;
     //Traffic
-    ofile<< "Mem traffic (GB/s):       "<< traffic <<endl;
+    //ofile<< "Data size (GB):         "<< traffic <<endl;
     //p strong scaling
-    ofile << "p:                       "<<  Tp_sec/Ts_sec << endl;
+    ofile << "p:                       "<< Tp_sec/Ts_sec << endl;
     ofile << "Sp_strong:               "<< Tp/Ts<<endl;
-    ofile << "Ws,Ts:                   "<< Ws<<","<<Ts<<endl;
-    ofile << "Wp,Tp:                   "<< Wp<<","<<Tp<<endl;
-
+    ofile << "Ws (GB), Ts (s):         "<< Ws<<","<<Ts<<endl;
+    ofile << "Wp (GB), Tp (s):         "<< Wp<<","<<Tp<<endl;
+    ofile << "Rel-times: IO-read, pre-proc, kernel, output: "<< twall_rel[0]<<"%, "<<twall_rel[1]<<"%, "<<twall_rel[2]<<"%, "<< twall_rel[3]<<"%"<<endl;
     ofile.close();
    
 }
@@ -314,7 +314,6 @@ int main(int argc, char **argv)
     PAPI_stop(event_set, output_counters); 
 
     /************std::cout output for us that we don't want to profile***********/
-    float FLOPS=0, TRAFFIC=0; 
     cout<<"\nFileReading:"<<endl;
     cout<<"Total elements read:"<<tot_nel_read<<", bytes:"<<tot_nel_read*sizeof(float)<<endl;
     output_profile(file_read_counters, times[0]);
@@ -331,10 +330,11 @@ int main(int argc, char **argv)
 
     cout<<"\nOutput:"<<endl;
     output_profile(output_counters, times[4]);
-    FLOPS = file_read_counters[0] + processing_counters[0] + Pk_counters[0] + output_counters[0];
-    //TRAFFIC = (file_read_counters[1] + processing_counters[1] +  Pk_counters[1] + output_counters[1])*sizeof(float);
+    //float TRAFFIC = (file_read_counters[1] + processing_counters[1] +  Pk_counters[1] + output_counters[1])*sizeof(float);
     
     //calculate desired quantities    
+    float FLOPS = file_read_counters[0] + processing_counters[0] + Pk_counters[0] + output_counters[0];
+	  FLOPS += file_read_counters[1] + processing_counters[1] + Pk_counters[1] + output_counters[1];
     float Tp = static_cast<float>(times[0]+times[1]+times[2]+times[4]) * 1e-9;
     float Ts = static_cast<float>(times[0]+times[1]+times[3]+times[4]) * 1e-9;
     float Tp_sec = static_cast<float>(times[2]);
@@ -343,12 +343,13 @@ int main(int argc, char **argv)
     vector<int> it = {0,1,2,4};
     for(int i=0;i<4;++i)
         rel_times[i] = times[it[i]]/Tp*1e-7;
-    size_t W = lst_Nr*lst_Nc*Nt*sizeof(float);  
-    write_analysis(Pk_counters, Tp, rel_times, TRAFFIC, Tp_sec, Ts_sec, W, Ts, W, Tp,"results.txt");
+    
+    float W = lst_Nr*lst_Nc*Nt*sizeof(float) * 1e-9;  
+    write_analysis(Pk_counters, P_counters_serial, Tp, rel_times, Tp_sec, Ts_sec, W, Tp, W, Ts, outfile);
 
     cout<<"\nTotals:\n";
     cout << "Execution time:       "<<Tp<<"s, File reading("<<rel_times[0]<<"%), Processing("<<rel_times[1]<<"%), Pk("<<rel_times[2]<<"%), Output("<<rel_times[3]<<"%)\n";     
-    cout << "Traffic: (Bytes):     " << TRAFFIC << '\n';
+    //cout << "Traffic: (Bytes):     " << TRAFFIC << '\n';
     cout << "Flops:                " << FLOPS << '\n';
     cout << "Operational Intensity: " << FLOPS/tot_nel_read/sizeof(float) << '\n';
     
