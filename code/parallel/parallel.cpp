@@ -11,6 +11,7 @@
 #include <cstring>
 #include "Geotiff.hpp"
 #include "transforms.hpp"
+#include <sstream>
 
 using namespace std;
 
@@ -124,21 +125,21 @@ struct  DateContainer
    }   
 };
 
-void write_analysis(long long int Pk_counters[2], long long int Pk_counters_serial[2], float twall, float twall_rel[4], 
+void write_analysis(long long int Pk_counters[2], long long int Pk_counters_serial[2], long long int dt, float twall, float twall_rel[4], 
 		float Tp_sec, float Ts_sec, float Wp, float Tp, float Ws, float Ts, String filename)
 {
     ofstream ofile(filename.c_str()); 
     ofile << "Wall time (s):           "<< twall << endl;
     //Gflop/s
-    float gflops = (Pk_counters[0] + Pk_counters[1]) / twall;
+    float gflops = (Pk_counters[0] + Pk_counters[1])*1e-9 / static_cast<float>(dt);
     ofile << "Performance (Gflops/s):  "<<gflops<<endl;
     //percent of peak
     ofile << "frac peak perf:          "<<gflops/3340<<"%"<<endl;
     //Traffic
     //ofile<< "Data size (GB):         "<< traffic <<endl;
     //p strong scaling
-    ofile << "p:                       "<< Tp_sec/Ts_sec << endl;
-    ofile << "Sp_strong:               "<< Tp/Ts<<endl;
+    ofile << "p:                       "<< Ts_sec/Tp_sec << endl;
+    ofile << "Sp_strong:               "<< Ts/Tp<<endl;
     ofile << "Ws (GB), Ts (s):         "<< Ws<<","<<Ts<<endl;
     ofile << "Wp (GB), Tp (s):         "<< Wp<<","<<Tp<<endl;
     ofile << "Rel-times: IO-read, pre-proc, kernel, output: "<< twall_rel[0]<<"%, "<<twall_rel[1]<<"%, "<<twall_rel[2]<<"%, "<< twall_rel[3]<<"%"<<endl;
@@ -169,14 +170,18 @@ int main(int argc, char **argv)
     //Get the filename "either a default or specified from command line"
     const char* pszFilename;
     const char* pszDir;
+    const char* outfile;
 
-    if(argc==2)
+    if(argc==3){
         pszDir = argv[1];
+        outfile = argv[2];
+    }
     else
         return EINVAL;
 
     //profiling stuff
     auto ret  = PAPI_library_init(PAPI_VER_CURRENT);
+    //if(PAPI_thread_init(pthread_self) != PAPI_OK){throw::runtime_error("couldnt init papi thread\n");}
     if( ret != PAPI_VER_CURRENT){
         if(ret>0)
 		throw::runtime_error("PAPI library mismatch!\n");
@@ -263,7 +268,7 @@ int main(int argc, char **argv)
     //get the date/loop over images
     t0 = PAPI_get_real_nsec();
     PAPI_start(event_set);
-    alignas(64) float Pk[lst_Nr*lst_Nc*Nt]; //(float*)malloc(lst_Nr*lst_Nc*Nt*sizeof(float));
+    float* Pk = (float*)_mm_malloc(lst_Nr*lst_Nc*Nt*16*sizeof(float), 64);
     vector<tuple<int,int,int>> dates;
     size_t nt=0;
     for(auto &yearv : data.images){
@@ -275,8 +280,8 @@ int main(int argc, char **argv)
                 //for(float &val : dayv.second){  
                 //}
 		if(lst_Nr!=dayv.second.Nrow or lst_Nc!=dayv.second.Ncol){
-		    free(Pk);
 		    throw::runtime_error("Images inconsistent-sizes across time!\n");
+		    _mm_free(Pk);
 		}
 		lst_Nr = dayv.second.Nrow;
 		lst_Nc = dayv.second.Ncol;
@@ -286,7 +291,9 @@ int main(int argc, char **argv)
             }
         }
     }
+    lst_Nc = 16*lst_Nc;
     times[1] += PAPI_get_real_nsec() - t0;
+    //lst_Nc = 16*lst_Nc; //temporary hack to make worl
     //PAPI_accum(event_set, processing_counters);
     PAPI_stop(event_set, processing_counters);
 
@@ -345,7 +352,7 @@ int main(int argc, char **argv)
         rel_times[i] = times[it[i]]/Tp*1e-7;
     
     float W = lst_Nr*lst_Nc*Nt*sizeof(float) * 1e-9;  
-    write_analysis(Pk_counters, P_counters_serial, Tp, rel_times, Tp_sec, Ts_sec, W, Tp, W, Ts, outfile);
+    write_analysis(Pk_counters, Pk_counters_serial, times[2], Tp, rel_times, Tp_sec, Ts_sec, W, Tp, W, Ts, outfile);
 
     cout<<"\nTotals:\n";
     cout << "Execution time:       "<<Tp<<"s, File reading("<<rel_times[0]<<"%), Processing("<<rel_times[1]<<"%), Pk("<<rel_times[2]<<"%), Output("<<rel_times[3]<<"%)\n";     
@@ -353,6 +360,6 @@ int main(int argc, char **argv)
     cout << "Flops:                " << FLOPS << '\n';
     cout << "Operational Intensity: " << FLOPS/tot_nel_read/sizeof(float) << '\n';
     
-    //free(Pk);
+    _mm_free(Pk);
     return 1;
 }

@@ -5,7 +5,7 @@ JSON_LIB=/shared/software/spack/opt/spack/linux-amzn2-skylake_avx512/gcc-7.3.1/j
 OPENSSL_LIB=/shared/software/spack/opt/spack/linux-amzn2-skylake_avx512/gcc-7.3.1/openssl-3.1.3-lbbwfmbwca7cmvxrlsdxwq7ax5zgtch4/lib64
 CPPFLAGS=-g -O3 -Wall -I${GDAL_DIR}/include -I${PAPI_DIR}/include -I${EIGEN_INC} 
 LDFLAGS=-L${PROJ_DIR}/lib64 -L${GDAL_DIR}/lib64 -L${PAPI_DIR}/lib -L${JSON_LIB} -L${OPENSSL_LIB} -L${TURBOJPEG_LIB}
-LFLAGS=-lgdal -lm -lpapi -lstdc++fs -lturbojpeg -mavx512f -mfma -march=native -mtune=skylake -ffast-math
+LFLAGS=-lgdal -lm -lpapi -lstdc++fs -lturbojpeg -mavx512f -mfma -march=native -mtune=skylake -ffast-math #-fopenmp
 
 all: parallel
 

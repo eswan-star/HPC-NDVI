@@ -23,4 +23,6 @@ export OPENSSL_LIB=/shared/software/spack/opt/spack/linux-amzn2-skylake_avx512/g
 export TURBOJPEG_LIB=/shared/software/spack/opt/spack/linux-amzn2-skylake_avx512/gcc-7.3.1/libjpeg-turbo-3.0.0-3bwcg2epbokfwg23jqkvcsmq6qntntkl/lib64
 export LD_LIBRARY_PATH=${GDAL_DIR}/lib64/:${TURBOJPEG_LIB}:${PROJ_DIR}/lib64:${OPENSSL_LIB}:${JSON_LIB}:${PAPI_LIB}:${TIFF_LIB}:${LD_LIBRARY_PATH}
 
-parallel/parallel parallel/data/
+#OMP_PLACES='cores'
+OMP_NUM_THREADS=4
+parallel/parallel parallel/data/ results1.txt
