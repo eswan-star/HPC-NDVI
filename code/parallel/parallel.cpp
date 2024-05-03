@@ -124,13 +124,13 @@ struct  DateContainer
    }   
 };
 
-void write_analysis(long long int Pk_counters[5], float twall, float twall_rel[4],  float traffic, 
+void write_analysis(long long int Pk_counters[2], float twall, float twall_rel[4],  float traffic, 
 		float Tp_sec, float Ts_sec, size_t Ws, float Ts, size_t Wp, float Tp, String filename)
 {
     ofstream ofile(filename.c_str()); 
     ofile << "Wall time(s):            "<< twall << endl;
     //Gflop/s
-    float gflops = (Pk_counters[0] + Pk_counters[4]) / twall;
+    float gflops = (Pk_counters[0] + Pk_counters[1]) / twall;
     ofile << "Performance (Gflops/s):  "<<gflops<<endl;
     //percent of peak
     ofile << "frac peak perf:          "<<gflops/3340<<"%"<<endl;
@@ -146,20 +146,20 @@ void write_analysis(long long int Pk_counters[5], float twall, float twall_rel[4
    
 }
 
-void output_profile( long long int counters[5], long long int dt)
+void output_profile( long long int counters[2], long long int dt)
 {
     float sflops = static_cast<float>(counters[0])*1e-9;       
-    float vflops = static_cast<float>(counters[5])*1e-9;
-    long long int traffic = counters[1]*sizeof(float); 
-    long long int total_l1d_cache_misses = counters[2]; 
+    float vflops = static_cast<float>(counters[1])*1e-9;
+    //long long int traffic = counters[1]*sizeof(float); 
+    //long long int total_l1d_cache_misses = counters[2]; 
     
     double twall = static_cast<double>(dt) * 1.0e-9; // seconds
     cout << "Wall time(s):                 " << twall << '\n';
     cout << "SFlops:                        " << sflops << '\n';
     cout << "VFlops:                       " << vflops << '\n';
-    cout << "Traffic (bytes):              " << traffic << '\n';
-    cout << "Operational Intensity:        " << static_cast<double>(sflops)/traffic << '\n';
-    cout << "L1d Cache Misses:             " << total_l1d_cache_misses << '\n'; 
+    //cout << "Traffic (bytes):              " << traffic << '\n';
+    //cout << "Operational Intensity:        " << static_cast<double>(sflops)/traffic << '\n';
+    //cout << "L1d Cache Misses:             " << total_l1d_cache_misses << '\n'; 
     return;
 }
 
@@ -190,14 +190,29 @@ int main(int argc, char **argv)
 	}
     }
     int event_set = PAPI_NULL;
-    int events[5]    = {PAPI_SP_OPS, PAPI_LST_INS, PAPI_L1_DCM, PAPI_L1_ICM, PAPI_VEC_SP};
-    long long int file_read_counters[5]  = {0,0,0,0,0};
-    long long int processing_counters[5] = {0,0,0,0,0};
-    long long int Pk_counters[5]         = {0,0,0,0,0};
-    long long int Pk_counters_serial[5]  = {0,0,0,0,0};
-    long long int output_counters[5]     = {0,0,0,0,0};
-    PAPI_create_eventset(&event_set);
-    PAPI_add_events(event_set, events, 5);
+    int events[2]    = {PAPI_SP_OPS,  PAPI_VEC_SP};
+    long long int file_read_counters[2]  = {0,0};
+    long long int processing_counters[2] = {0,0};
+    long long int Pk_counters[2]         = {0,0};
+    long long int Pk_counters_serial[2]  = {0,0};
+    long long int output_counters[2]     = {0,0};
+    auto ret2 = PAPI_create_eventset(&event_set);
+    if(ret2 != PAPI_OK){
+	    cout<<"PAPI_ECNFLCT? "<<(ret==PAPI_ECNFLCT)<<endl;
+	    throw::runtime_error("Couldn't create event-set");
+    }
+    auto ret3 = PAPI_add_events(event_set, events, 2);
+   if(ret3 != PAPI_OK){
+	cout<<"ret:"<<ret3<<endl;
+        cout<<"PAPI_ECNFLCT? "<<(ret3==PAPI_ECNFLCT)<<endl;
+	cout<<"PAPI_ENOEVST? "<<(ret3==PAPI_ENOEVST)<<endl;
+	cout<<"PAPI_EISRUN?  "<<(ret3==PAPI_EISRUN)<<endl;
+	cout<<"PAPI_ENOEVNT? "<<(ret3==PAPI_ENOEVNT)<<endl;
+	cout<<"PAPI_ENOMEM?  "<<(ret3==PAPI_ENOMEM)<<endl;
+	cout<<"PAPI_EBUG?    "<<(ret3==PAPI_EBUG)<<endl;
+	cout<<"PAPI_EINVAL?  "<<(ret3==PAPI_EINVAL)<<endl;
+	throw::runtime_error("Couldn't add events");
+   }
     long long int t0;
     long long int times[5] = {0,0,0,0,0};
     int lst_Nr, lst_Nc;
@@ -247,7 +262,7 @@ int main(int argc, char **argv)
     /***************************do pre-processing******************************/
     //get the date/loop over images
     t0 = PAPI_get_real_nsec();
-    PAPI_start(event_set
+    PAPI_start(event_set);
     alignas(64) float Pk[lst_Nr*lst_Nc*Nt]; //(float*)malloc(lst_Nr*lst_Nc*Nt*sizeof(float));
     vector<tuple<int,int,int>> dates;
     size_t nt=0;
@@ -317,7 +332,7 @@ int main(int argc, char **argv)
     cout<<"\nOutput:"<<endl;
     output_profile(output_counters, times[4]);
     FLOPS = file_read_counters[0] + processing_counters[0] + Pk_counters[0] + output_counters[0];
-    TRAFFIC = (file_read_counters[1] + processing_counters[1] +  Pk_counters[1] + output_counters[1])*sizeof(float);
+    //TRAFFIC = (file_read_counters[1] + processing_counters[1] +  Pk_counters[1] + output_counters[1])*sizeof(float);
     
     //calculate desired quantities    
     float Tp = static_cast<float>(times[0]+times[1]+times[2]+times[4]) * 1e-9;
