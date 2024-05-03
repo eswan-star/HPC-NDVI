@@ -31,24 +31,29 @@
     accum[5] = _mm512_fmadd_ps(img_slice, f_col[5], accum[5]);\
     accum[6] = _mm512_fmadd_ps(img_slice, f_col[6], accum[6]);
 
+#define F(op,m,k,N)\
+	op(PI2*m*k/N)
+
 using namespace std;
 
 void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr, const int &Nc)
 {
  
     alignas(64) float row_tmp[Nc];
+    alignas(64) float img_data_tmp[Nc];
     __m512 img_slice, mask;
     __m512 f_col[PIPL_CHUNK], accum[PIPL_CHUNK]; 
-    int lstop = floor(Nc/PIPL_CHUNK);
-    int nstop = floor(Nc/SIMD_CHUNK);
+    int lstop = floor((float)Nc/PIPL_CHUNK)*PIPL_CHUNK;
+    int nstop = floor((float)Nc/SIMD_CHUNK)*SIMD_CHUNK; 
     for(int T=0; T<Nt; ++T)
     {
 	    for(int m=0; m<Nr; m++)
 	    { 
-		    //zero temporary memory used for storing row fo result 
+		    //zero temporary memory used for storing row for result 
 		    memset(row_tmp, 0, Nc*sizeof(float));
+		    memcpy(img_data_tmp, &img_data[T*Nc*Nr + m*Nc], Nc*sizeof(float));
 		    for(int l=0; l<lstop; l+=PIPL_CHUNK)
-		    {   
+		    {  
 			//zero accumulators
 			for(int i=0; i<PIPL_CHUNK; ++i)
 			    accum[i] = _mm512_set1_ps(0.0);
@@ -56,30 +61,31 @@ void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr
 			for(int n=0; n<nstop; n+=SIMD_CHUNK)
 			{
 			    //load image slice
-			    img_slice = _mm512_load_ps(&img_data[T*Nc*Nr + m*Nc + n]);
+			    img_slice = _mm512_load_ps(&img_data_tmp[n]);
+			    
 			    //get chunk of transform-matrix
 			    GET_F_COL(cos,l,n,Nc)
 				    
 			    //multiply with row and store
 			    ACCUMULATE()
 			}
-
-			//do remainder
+			
+			//Do remainder
 			int rem = Nc - nstop;
 			alignas(64) float msk[SIMD_CHUNK];
 			memset(msk,0,SIMD_CHUNK*sizeof(float));
 			for(int m=0;m<rem;m++)
 			    msk[m] = 1;
-			//this will read past the end of the matrix we're currently
+			
+			//This will read past the end of the matrix we're currently
 			//considering, but those entries wil be zeroed out. Would be
 			//a segfault though if was last row of matrix (fortunately, 
 			//never will be because that's handled outside this main loop.)
 			mask = _mm512_load_ps(msk); 
-			img_slice = _mm512_load_ps(&img_data[T*Nr*Nc+m*Nc+nstop]);
+			img_slice = _mm512_load_ps(&img_data_tmp[nstop]);
 			img_slice = _mm512_mul_ps(img_slice, mask);
 			GET_F_COL(cos,l,nstop,Nc)
-			ACCUMULATE()
-			
+			ACCUMULATE()	
 			//do final horizontal add and write to dest 
 			alignas(64) float tmp[SIMD_CHUNK];
 			for(int li=0;li<PIPL_CHUNK;++li){
@@ -87,31 +93,27 @@ void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr
 			    row_tmp[l+li] = tmp[0]+tmp[1]+tmp[2]+tmp[3]+tmp[4]+tmp[5]+
 				tmp[6]+tmp[7]+tmp[8]+tmp[9]+tmp[10]+tmp[11]+tmp[12]+
 				tmp[13]+tmp[14]+tmp[15];
-			}
-			
+			}	
 		    }
 		    //now need to do all of the above but when there's less than PIPL_CHUNK columns left
-		    //for now do in loop b/c can't know remaining dimensions until runtime. 
+		    //for now do in loop b/c can't know remaining dimensions until runtime.  
 		    for(int l=lstop;l<Nc;l++){
 			accum[0] = _mm512_set1_ps(0.0);
 			for(int n=0;n<nstop;n+=SIMD_CHUNK){
-			    img_slice = _mm512_load_ps(&img_data[T*Nr*Nc + m*Nc + n]);
+			    img_slice = _mm512_load_ps(&img_data_tmp[n]);
 			    f_col[0] = set_mm512(cos,l,n,Nc)
 			    accum[0] = _mm512_fmadd_ps(img_slice, f_col[0], accum[0]);
 			}
 			//Now can't do vectorized read because would go past end of matrix;
 			//so loop:
-			alignas(64) float f[SIMD_CHUNK];
 			alignas(64) float tmp[SIMD_CHUNK];
-			f_col[0] = set_mm512(cos,l,nstop,Nc)
-			_mm512_store_ps(f, f_col[0]);//just to get fourier terms
 			_mm512_store_ps(tmp, accum[0]);
 			row_tmp[l] = tmp[0]+tmp[1]+tmp[2]+tmp[3]+tmp[4]+tmp[5]+
 				tmp[6]+tmp[7]+tmp[8]+tmp[9]+tmp[10]+tmp[11]+tmp[12]+
 				tmp[13]+tmp[14]+tmp[15]; 
 			for(int n=nstop;n<Nc;n++){
 			    //now need to ad up last un-accumulated fourier terms
-			    row_tmp[l] += f[n]*img_data[T*Nr*Nc + m*Nc + n];
+			    row_tmp[l] += F(cos,l,n,Nc) * img_data_tmp[n];
 			}
 		    }
 		    //congrats, you've finished a row. Now write it out.
@@ -122,11 +124,7 @@ void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr
 }
 
 
-
-#define F(op,m,k,N)\
-	op(PI2*m*k/N);
-
-void left_transform(float* __restrict__ img_data, const int &Nt, const int&Nr, const int &Nc)
+void left_transform_serial(float* __restrict__ img_data, const int &Nt, const int&Nr, const int &Nc)
 {
     float mat_tmp[Nr*Nc];// = (float*)malloc(Nr*Nc*sizeof(float));
     memset(mat_tmp,0,sizeof(float)*Nc*Nr);
@@ -145,7 +143,7 @@ void left_transform(float* __restrict__ img_data, const int &Nt, const int&Nr, c
                 {
                     for(size_t k=0;k<Nr;k++)
                     {
-                        float f_mk = F(cos,m,k,Nr)
+                        float f_mk = F(cos,m,k,Nr);
                         for(size_t n=start;n<stop;n++)
                         {
                             mat_tmp[m*Nc+n] += f_mk*img_data[T*Nr*Nc + m*Nc + n];
@@ -167,9 +165,14 @@ void get_Pk_kernel(float*__restrict__ img_data, const int &Nt, const int &Nr, co
 {
    //This is pretty simple for now, just apply one transform then the other. 
    cout<<"Right transform."<<endl;
-   right_transform(img_data, Nr, Nc, Nt);
+   right_transform(img_data, Nt, Nr, Nc);
    cout<<"Left transform."<<endl;
-   left_transform(img_data, Nr, Nc, Nt);
+   left_transform_serial(img_data, Nt, Nr, Nc);
 }
 
+void get_Pk_kernel_serial(float*__restrict__ img_data, const int &Nt, const int &Nr, const int &Nc)
+{
+   right_transform(img_data, Nt, Nr, Nc);
+   left_transform_serial(img_data, Nt, Nr, Nc); 
+}
 

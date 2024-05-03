@@ -1,5 +1,5 @@
 #include <algorithm>
-#include "papi.h"
+#include <papi.h>
 #include <numeric>
 #include <experimental/filesystem>
 #include <regex>
@@ -124,15 +124,13 @@ struct  DateContainer
    }   
 };
 
-void write_analysis(long long int Pk_counters[5], long long int dt, float traffic, 
-		float Tp_sec, float Ts_sec, float Ws, float Ts, float Wp[3], float Tp[3])
+void write_analysis(long long int Pk_counters[5], float twall, float twall_rel[4],  float traffic, 
+		float Tp_sec, float Ts_sec, size_t Ws, float Ts, size_t Wp, float Tp, String filename)
 {
     ofstream ofile(filename.c_str()); 
-    //wall time
-    float twall = static_cast<float>(dt) * 1.0e-9; // seconds
     ofile << "Wall time(s):            "<< twall << endl;
     //Gflop/s
-    float gflops = (Pk_conters[0] + Pk_counters[4]) / twall;
+    float gflops = (Pk_counters[0] + Pk_counters[4]) / twall;
     ofile << "Performance (Gflops/s):  "<<gflops<<endl;
     //percent of peak
     ofile << "frac peak perf:          "<<gflops/3340<<"%"<<endl;
@@ -142,22 +140,23 @@ void write_analysis(long long int Pk_counters[5], long long int dt, float traffi
     ofile << "p:                       "<<  Tp_sec/Ts_sec << endl;
     ofile << "Sp_strong:               "<< Tp/Ts<<endl;
     ofile << "Ws,Ts:                   "<< Ws<<","<<Ts<<endl;
-    for(int i=0;i<3;i++)
-        ofile<<i<<". Wp,Tp:                "<< Wp[i]<<","<<Tp[i]<<endl;
+    ofile << "Wp,Tp:                   "<< Wp<<","<<Tp<<endl;
 
     ofile.close();
    
 }
 
-void output_profile( long long int counters[4], long long int dt)
+void output_profile( long long int counters[5], long long int dt)
 {
-    long long sflops = counters[0];       
-    long long traffic = counters[1]*sizeof(float); 
-    long long total_l1d_cache_misses = counters[2]; 
+    float sflops = static_cast<float>(counters[0])*1e-9;       
+    float vflops = static_cast<float>(counters[5])*1e-9;
+    long long int traffic = counters[1]*sizeof(float); 
+    long long int total_l1d_cache_misses = counters[2]; 
     
     double twall = static_cast<double>(dt) * 1.0e-9; // seconds
     cout << "Wall time(s):                 " << twall << '\n';
-    cout << "Flops:                        " << sflops << '\n';
+    cout << "SFlops:                        " << sflops << '\n';
+    cout << "VFlops:                       " << vflops << '\n';
     cout << "Traffic (bytes):              " << traffic << '\n';
     cout << "Operational Intensity:        " << static_cast<double>(sflops)/traffic << '\n';
     cout << "L1d Cache Misses:             " << total_l1d_cache_misses << '\n'; 
@@ -177,17 +176,30 @@ int main(int argc, char **argv)
         return EINVAL;
 
     //profiling stuff
+    auto ret  = PAPI_library_init(PAPI_VER_CURRENT);
+    if( ret != PAPI_VER_CURRENT){
+        if(ret>0)
+		throw::runtime_error("PAPI library mismatch!\n");
+	else{
+	    cout<<"PAPI_EINVAL?:  "<<(ret==PAPI_EINVAL)<<endl;
+	    cout<<"PAPI_ENOMEM?:  "<<(ret==PAPI_ENOMEM)<<endl;
+	    cout<<"PAPI_ESBSTR?:  "<<(ret==PAPI_ESBSTR)<<endl;
+	    cout<<"PAPI_ECMP?:    "<<(ret==PAPI_ECMP)<<endl;
+	    cout<<"PAPI ESYS?:    "<<(ret==PAPI_ESYS)<<endl;
+	    throw::runtime_error("Problem initializing PAPI\n");
+	}
+    }
     int event_set = PAPI_NULL;
     int events[5]    = {PAPI_SP_OPS, PAPI_LST_INS, PAPI_L1_DCM, PAPI_L1_ICM, PAPI_VEC_SP};
     long long int file_read_counters[5]  = {0,0,0,0,0};
     long long int processing_counters[5] = {0,0,0,0,0};
-    long long int Pk_counters[5] = {0,0,0,0,0};
-    long long int output_counters[5] = {0,0,0,0,0};
-    PAPI_library_init(PAPI_VER_CURRENT);
+    long long int Pk_counters[5]         = {0,0,0,0,0};
+    long long int Pk_counters_serial[5]  = {0,0,0,0,0};
+    long long int output_counters[5]     = {0,0,0,0,0};
     PAPI_create_eventset(&event_set);
     PAPI_add_events(event_set, events, 5);
     long long int t0;
-    long long int times[4] = {0,0,0,0};
+    long long int times[5] = {0,0,0,0,0};
     int lst_Nr, lst_Nc;
 
     /********************************read the files*************************/
@@ -227,18 +239,18 @@ int main(int argc, char **argv)
         tot_nel_read += data(year, month, day).size();
         Nt++;
     }   
-    //PAPI_stop(event_set[0], file_read_counters);
-    PAPI_accum(event_set, file_read_counters);
+    PAPI_stop(event_set, file_read_counters);
+    //PAPI_accum(event_set, file_read_counters);
     times[0] += PAPI_get_real_nsec() - t0;
     
     cout<<"starting processing: N:"<<data.size<<endl;
     /***************************do pre-processing******************************/
     //get the date/loop over images
     t0 = PAPI_get_real_nsec();
+    PAPI_start(event_set
     alignas(64) float Pk[lst_Nr*lst_Nc*Nt]; //(float*)malloc(lst_Nr*lst_Nc*Nt*sizeof(float));
     vector<tuple<int,int,int>> dates;
     size_t nt=0;
-    //PAPI_start(event_set);
     for(auto &yearv : data.images){
         int year = yearv.first;
         for(auto &monthv : yearv.second){
@@ -260,21 +272,30 @@ int main(int argc, char **argv)
         }
     }
     times[1] += PAPI_get_real_nsec() - t0;
-    PAPI_accum(event_set, processing_counters);
- 
+    //PAPI_accum(event_set, processing_counters);
+    PAPI_stop(event_set, processing_counters);
+
     /*********************************now do the correlation function analysis*****************************/
     cout<<"Do analysis Nt:"<<Nt<<", Nr:"<<lst_Nr<<", Nc:"<<lst_Nc<<endl;
     t0 = PAPI_get_real_nsec();
-    //PAPI_start(event_set);
+    PAPI_start(event_set);
     get_Pk_kernel(Pk, Nt, lst_Nr, lst_Nc);
     times[2] += PAPI_get_real_nsec() - t0;
-    PAPI_accum(event_set, Pk_counters); 
-    
+    PAPI_stop(event_set, Pk_counters); 
+
+    //now do serial
+    t0 = PAPI_get_real_nsec();
+    PAPI_start(event_set);
+    get_Pk_kernel_serial(Pk, Nt, lst_Nr, lst_Nc);
+    times[3] += PAPI_get_real_nsec() - t0;
+    PAPI_stop(event_set, Pk_counters_serial); 
+
     /*********************************now do the output**************************/
     t0 = PAPI_get_real_nsec();
+    PAPI_start(event_set);
     //Write out a text file which has timing data so python can use it 
     write_binary(Pk, Nt, lst_Nr, lst_Nc, "Pk.bin");
-    times[3] += PAPI_get_real_nsec() - t0;
+    times[4] += PAPI_get_real_nsec() - t0;
     PAPI_stop(event_set, output_counters); 
 
     /************std::cout output for us that we don't want to profile***********/
@@ -290,22 +311,31 @@ int main(int argc, char **argv)
     cout<<"\nPk:"<<endl;
     output_profile(Pk_counters, times[2]);
       
+    cout<<"\nPk serial:"<<endl;
+    output_profile(Pk_counters_serial, times[3]);
+
     cout<<"\nOutput:"<<endl;
-    output_profile(output_counters, times[3]);
-    
+    output_profile(output_counters, times[4]);
     FLOPS = file_read_counters[0] + processing_counters[0] + Pk_counters[0] + output_counters[0];
     TRAFFIC = (file_read_counters[1] + processing_counters[1] +  Pk_counters[1] + output_counters[1])*sizeof(float);
-    write_analysis(, "results.txt");
-    double total_time = static_cast<double>(times[0]+times[1]+times[2]+times[3]) * 1e-9;
-    double rel_times[4];
-    for(int i=0;i<4;i++)
-        rel_times[i] = times[i]/total_time*1e-7;
+    
+    //calculate desired quantities    
+    float Tp = static_cast<float>(times[0]+times[1]+times[2]+times[4]) * 1e-9;
+    float Ts = static_cast<float>(times[0]+times[1]+times[3]+times[4]) * 1e-9;
+    float Tp_sec = static_cast<float>(times[2]);
+    float Ts_sec = static_cast<float>(times[3]);
+    float rel_times[4];
+    vector<int> it = {0,1,2,4};
+    for(int i=0;i<4;++i)
+        rel_times[i] = times[it[i]]/Tp*1e-7;
+    size_t W = lst_Nr*lst_Nc*Nt*sizeof(float);  
+    write_analysis(Pk_counters, Tp, rel_times, TRAFFIC, Tp_sec, Ts_sec, W, Ts, W, Tp,"results.txt");
 
     cout<<"\nTotals:\n";
-    cout << "Execution time:       "<<total_time<<"s, File reading("<<rel_times[0]<<"%), Processing("<<rel_times[1]<<"%), Pk("<<rel_times[2]<<"%), Output("<<rel_times[3]<<"%)\n";     
+    cout << "Execution time:       "<<Tp<<"s, File reading("<<rel_times[0]<<"%), Processing("<<rel_times[1]<<"%), Pk("<<rel_times[2]<<"%), Output("<<rel_times[3]<<"%)\n";     
     cout << "Traffic: (Bytes):     " << TRAFFIC << '\n';
     cout << "Flops:                " << FLOPS << '\n';
-    cout << "Opertional Intensity: " << FLOPS/tot_nel_read/sizeof(float) << '\n';
+    cout << "Operational Intensity: " << FLOPS/tot_nel_read/sizeof(float) << '\n';
     
     //free(Pk);
     return 1;
