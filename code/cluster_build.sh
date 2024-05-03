@@ -70,6 +70,7 @@ fi
 
 #build targets
 cd parallel/
+make clean
 make
 
 cd ${TOP_DIR}
