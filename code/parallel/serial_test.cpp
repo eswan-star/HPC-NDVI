@@ -20,14 +20,12 @@ class Image
 {
     public:
         vector<float> vec;
-        float *data;
         float mean;
 	int Nrow;
 	int Ncol;
 	
 	Image(void)
 	{
-	    data = NULL;
 	    mean = numeric_limits<float>::min();
 	    Nrow=-1;
 	    Ncol=-1;
@@ -38,7 +36,6 @@ class Image
             //get image dimensions
             Nrow = _dims[0];
             Ncol = _dims[1];
-            data = _data.data();    
             vec = _data;
 	    mean = -numeric_limits<float>::max();
         }
@@ -46,8 +43,7 @@ class Image
 	Image(vector<float> &_data, int Nr, int Nc)
 	{
             Nrow = Nr;
-            Ncol = Nc;
-            data = _data.data();    
+            Ncol = Nc;    
             vec = _data;
 	    mean = -numeric_limits<float>::max();
 	}
@@ -59,27 +55,27 @@ class Image
 	    for(int i=0; i<Nrow;++i){
 		for(int j=0;j<Ncol;++j){
 		    int idx = i*Ncol+j;
-	            if(data[idx]<255){
-                        data[idx] = (data[idx]-125)/125.0;
-                        mean += data[idx]; 
+	            if(vec[idx]<255){
+                        vec[idx] = (vec[idx]-125)/125.0;
+                        mean += vec[idx]; 
 			++cnt;	
                     }
 	            else
-			data[idx] = 0;
+			vec[idx] = 0;
 		}
 	    }
 	    mean /= cnt;
 	    for(int i=0;i<Nrow;++i)
 	        for(int j=0;j<Ncol;++j){
 		    int idx = i*Ncol+j;
-		    data[idx] = (data[idx]-mean)/mean;
+		    vec[idx] = (vec[idx]-mean)/mean;
 		}
 	    return;
 	}
 
         float &operator()(int row, int col)
         {
-            return data[row*Ncol+col]; 
+            return vec[row*Ncol+col]; 
         }
 
 	int inline size(void)
@@ -138,9 +134,9 @@ void write_analysis(long long int Pk_counters[2], long long int Pk_counters_seri
     //Traffic
     //ofile<< "Data size(GB):          "<< traffic <<endl;
     //p strong scaling
-    ofile << "p:                       N/A"<<endl;// Ts_sec/Tp_sec << endl;
-    ofile << "Sp_strong:               N/A"<<endl;// Ts/Tp<<endl;
-    ofile << "Ws(GB), Ts(s):           N/A"<<endl;// Ws<<", "<<Ts<<endl;
+    ofile << "p:                       "<< Ts_sec/Tp_sec << endl;
+    ofile << "Sp_strong:               "<< Ts/Tp<<endl;
+    ofile << "Ws(GB), Ts(s):           "<< Ws<<", "<<Ts<<endl;
     ofile << "Wp(GB), Tp(s):           "<< Wp<<", "<<Tp<<endl;
     ofile << "Rel-times: IO-read, pre-proc, kernel, output: "<< twall_rel[0]<<"%, "<<twall_rel[1]<<"%, "<<twall_rel[2]<<"%, "<< twall_rel[3]<<"%"<<endl;
     ofile.close();
@@ -276,7 +272,6 @@ int main(int argc, char **argv)
     t0 = PAPI_get_real_nsec();
     PAPI_start(event_set);
     float* Pk = (float*)_mm_malloc(lst_Nr*lst_Nc*Nt*sizeof(float), 64);
-    cout<<"made Pk"<<endl;
     vector<tuple<int,int,int>> dates;
     size_t nt=0;
     for(auto &yearv : data.images){
@@ -313,11 +308,11 @@ int main(int argc, char **argv)
     PAPI_stop(event_set, Pk_counters); 
 
     //now do serial
-    //t0 = PAPI_get_real_nsec();
-    //PAPI_start(event_set);
-    //get_Pk_kernel_serial(Pk, Nt, lst_Nr, lst_Nc);
-    //times[3] += PAPI_get_real_nsec() - t0;
-    //PAPI_stop(event_set, Pk_counters_serial); 
+    t0 = PAPI_get_real_nsec();
+    PAPI_start(event_set);
+    get_Pk_kernel_serial(Pk, Nt, lst_Nr, lst_Nc);
+    times[3] += PAPI_get_real_nsec() - t0;
+    PAPI_stop(event_set, Pk_counters_serial); 
 
     /*********************************now do the output**************************/
     t0 = PAPI_get_real_nsec();
@@ -339,8 +334,8 @@ int main(int argc, char **argv)
     cout<<"\nPk:"<<endl;
     output_profile(Pk_counters, times[2]);
       
-    //cout<<"\nPk serial:"<<endl;
-    //output_profile(Pk_counters_serial, times[3]);
+    cout<<"\nPk serial:"<<endl;
+    output_profile(Pk_counters_serial, times[3]);
 
     cout<<"\nOutput:"<<endl;
     output_profile(output_counters, times[4]);
@@ -350,9 +345,9 @@ int main(int argc, char **argv)
     float FLOPS = file_read_counters[0] + processing_counters[0] + Pk_counters[0] + output_counters[0];
 	  FLOPS += file_read_counters[1] + processing_counters[1] + Pk_counters[1] + output_counters[1];
     float Tp = static_cast<float>(times[0]+times[1]+times[2]+times[4]) * 1e-9;
-    float Ts = -1;//static_cast<float>(times[0]+times[1]+times[3]+times[4]) * 1e-9;
+    float Ts = static_cast<float>(times[0]+times[1]+times[3]+times[4]) * 1e-9;
     float Tp_sec = static_cast<float>(times[2])*1e-9;
-    float Ts_sec = -1;//static_cast<float>(times[3])*1e-9;
+    float Ts_sec = static_cast<float>(times[3])*1e-9;
     float rel_times[4];
     vector<int> it = {0,1,2,4};
     for(int i=0;i<4;++i)

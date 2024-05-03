@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH -c 36
+#SBATCH --time=00:30:00 
 
 #make sure we have environment set-up
 . /shared/software/spack/share/spack/setup-env.sh
@@ -24,5 +27,13 @@ export TURBOJPEG_LIB=/shared/software/spack/opt/spack/linux-amzn2-skylake_avx512
 export LD_LIBRARY_PATH=${GDAL_DIR}/lib64/:${TURBOJPEG_LIB}:${PROJ_DIR}/lib64:${OPENSSL_LIB}:${JSON_LIB}:${PAPI_LIB}:${TIFF_LIB}:${LD_LIBRARY_PATH}
 
 #OMP_PLACES='cores'
-OMP_NUM_THREADS=4
-parallel/parallel parallel/data/ results1.txt
+
+srun parallel/serial_test  parallel/data/  resultss1_2.txt 1 1
+#srun parallel/serial_test  parallel/data/ results12.txt 1 2
+srun parallel/parallel     parallel/data/  results1_2.txt 1 2
+#srun parallel/parallel     parallel/data/  results8_1.txt 8 1
+srun parallel/parallel     parallel/data/  results8_2.txt 8 2
+#srun parallel/parallel     parallel/data/  results16_1.txt 16 1
+srun parallel/parallel     parallel/data/  results16_2.txt 16 2
+srun parallel/parallel     parallel/data/  results32_2.txt 32 2
+srun parallel/parallel     parallel/data/ results64_2.txt 64 2

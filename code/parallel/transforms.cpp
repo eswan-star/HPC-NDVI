@@ -54,7 +54,7 @@ void right_transform_serial(float * __restrict__ img_data, const int &Nt, const 
 //assumes Nc is multiple of 16 or padded to satisfy that requirement (for alignment)
 void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr, const int &Nc)
 {    
-    //#pragma omp parallel
+    #pragma omp parallel
     {
     float* row_tmp =(float*)_mm_malloc(Nc*sizeof(float),64);
     float* img_data_tmp = (float*)_mm_malloc(Nc*sizeof(float),64);
@@ -65,7 +65,7 @@ void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr
 
     for(int T=0; T<Nt; ++T)
     {
-	    //#pragma omp for nowait
+	    #pragma omp for nowait
 	    for(int m=0; m<Nr; m++)
 	    { 
 		    //zero temporary memory used for storing row for result 
@@ -152,7 +152,7 @@ void right_transform(float * __restrict__ img_data, const int &Nt, const int &Nr
 void left_transform(float *__restrict__ img_data, const int &Nt, const int&Nr, const int&Nc)
 {
     //ACJ: outer loop for time 
-    //#pragma omp parallel
+    #pragma omp parallel
     {
        __m512 img_slice, accum, f_mk; 
        float* mat_row = (float*)_mm_malloc(Nc*sizeof(float), 64);
@@ -160,7 +160,7 @@ void left_transform(float *__restrict__ img_data, const int &Nt, const int&Nr, c
 	for(int T=0; T<Nt; T++)
         { 
             memset(mat_row,0,sizeof(float)*Nc);
-            //#pragma omp for nowait//don't need to synchronize because threads touch different mem 
+            #pragma omp for nowait//don't need to synchronize because threads touch different mem 
             for(size_t m=0;m<Nr;m++)
             {    
                 for(size_t k=0;k<Nr;k++)
